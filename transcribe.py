@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import glob
 import json
 import os
@@ -185,18 +186,114 @@ def _require_whisper_model() -> Type["_WhisperModelType"]:
     return _RuntimeWhisperModel
 
 
-def load_config() -> TranscribeConfig:
-    """Load configuration from environment variables."""
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    """Return CLI arguments overriding environment defaults."""
 
-    recordings_dir = Path(os.environ.get("RECORDINGS_DIR", "./recordings")).expanduser().resolve()
-    output_dir = Path(os.environ.get("OUTPUT_DIR", "./out")).expanduser().resolve()
-    session_env = os.environ.get("SESSION_DIR")
+    parser = argparse.ArgumentParser(
+        description="Transkrybuj nagrania Discorda przy użyciu faster-whisper.",
+    )
+    parser.add_argument("--recordings", type=Path, help="Katalog z nagraniami Discorda")
+    parser.add_argument("--output", type=Path, help="Katalog wyjściowy na transkrypcje")
+    parser.add_argument(
+        "--session",
+        type=Path,
+        help="Konkretna sesja do przepisania (ścieżka względna lub absolutna)",
+    )
+    parser.add_argument("--device", choices=["cuda", "cpu"], help="Preferowane urządzenie wykonania")
+    parser.add_argument("--model", help="Wymuszony rozmiar modelu whisper (np. small, medium, large-v3)")
+    parser.add_argument(
+        "--compute-type",
+        choices=["int8_float16", "int8", "float16"],
+        help="Tryb obliczeń dla modelu whisper",
+    )
+    parser.add_argument("--beam-size", type=int, help="Rozmiar wiązki segmentów")
+    parser.add_argument("--language", help="Język docelowy dla modelu (np. pl, en)")
+    parser.add_argument(
+        "--vad",
+        dest="vad_filter",
+        action="store_true",
+        help="Włącz filtrację ciszy VAD",
+    )
+    parser.add_argument(
+        "--no-vad",
+        dest="vad_filter",
+        action="store_false",
+        help="Wyłącz filtrację ciszy VAD",
+    )
+    parser.add_argument(
+        "--sanitize-lower-noise",
+        dest="sanitize_lower_noise",
+        action="store_true",
+        help="Redukuj drobne wtrącenia (uhm, eee) w wynikach",
+    )
+    parser.add_argument(
+        "--keep-noise",
+        dest="sanitize_lower_noise",
+        action="store_false",
+        help="Pozostaw drobne wtrącenia w tekście",
+    )
+    parser.add_argument(
+        "--align-words",
+        dest="align_words",
+        action="store_true",
+        help="Generuj znaczniki słów (wymaga align/pyannote)",
+    )
+    parser.add_argument(
+        "--no-align-words",
+        dest="align_words",
+        action="store_false",
+        help="Pomiń generowanie znaczników słów",
+    )
+    parser.set_defaults(vad_filter=None, sanitize_lower_noise=None, align_words=None)
+    return parser.parse_args(argv)
+
+
+def _cli_overrides(args: Optional[argparse.Namespace]) -> bool:
+    if args is None:
+        return False
+    for name in (
+        "recordings",
+        "output",
+        "session",
+        "device",
+        "model",
+        "compute_type",
+        "beam_size",
+        "language",
+        "vad_filter",
+        "sanitize_lower_noise",
+        "align_words",
+    ):
+        if getattr(args, name, None) is not None:
+            return True
+    return False
+
+
+def load_config(args: Optional[argparse.Namespace] = None) -> TranscribeConfig:
+    """Load configuration from environment variables and optional CLI overrides."""
+
+    recordings_override = getattr(args, "recordings", None) if args else None
+    if recordings_override is not None:
+        recordings_dir = Path(recordings_override).expanduser().resolve()
+    else:
+        recordings_dir = Path(os.environ.get("RECORDINGS_DIR", "./recordings")).expanduser().resolve()
+
+    output_override = getattr(args, "output", None) if args else None
+    if output_override is not None:
+        output_dir = Path(output_override).expanduser().resolve()
+    else:
+        output_dir = Path(os.environ.get("OUTPUT_DIR", "./out")).expanduser().resolve()
+
+    session_override = getattr(args, "session", None) if args else None
+    session_env = os.environ.get("SESSION_DIR") if session_override is None else session_override
     session_dir = None
     if session_env:
         raw_session = Path(session_env).expanduser()
         session_dir = raw_session if raw_session.is_absolute() else recordings_dir / raw_session
 
-    requested_device = os.environ.get("WHISPER_DEVICE", "cuda").strip().lower()
+    requested_device_override = getattr(args, "device", None) if args else None
+    requested_device_env = os.environ.get("WHISPER_DEVICE", "cuda")
+    requested_device = (requested_device_override or requested_device_env).strip().lower()
     if requested_device not in {"cuda", "cpu"}:
         print(
             f"[!] Nieznany WHISPER_DEVICE={requested_device}, używam domyślnego cuda.",
@@ -206,9 +303,12 @@ def load_config() -> TranscribeConfig:
 
     policy_defaults = DEFAULT_POLICIES[requested_device]
 
-    model_env = os.environ.get("WHISPER_MODEL")
-    model_size = model_env.strip() if model_env and model_env.strip() else policy_defaults["model"]
-    compute_type_env = os.environ.get("WHISPER_COMPUTE")
+    model_override = getattr(args, "model", None) if args else None
+    model_env = os.environ.get("WHISPER_MODEL") if model_override is None else model_override
+    model_size = model_env.strip() if model_env and str(model_env).strip() else policy_defaults["model"]
+
+    compute_override = getattr(args, "compute_type", None) if args else None
+    compute_type_env = os.environ.get("WHISPER_COMPUTE") if compute_override is None else compute_override
     if compute_type_env is not None:
         compute_type_env = compute_type_env.strip().lower()
         if not compute_type_env:
@@ -236,12 +336,26 @@ def load_config() -> TranscribeConfig:
         if "WHISPER_COMPUTE" not in os.environ:
             compute_type = cpu_defaults["compute"]
 
-    beam_size = max(1, _parse_int(os.environ.get("WHISPER_SEGMENT_BEAM"), 5))
-    language = os.environ.get("WHISPER_LANG", "pl")
-    vad_filter = _strtobool_env(os.environ.get("WHISPER_VAD"), True)
+    beam_override = getattr(args, "beam_size", None) if args else None
+    if beam_override is not None:
+        beam_size = max(1, beam_override)
+    else:
+        beam_size = max(1, _parse_int(os.environ.get("WHISPER_SEGMENT_BEAM"), 5))
+
+    language_override = getattr(args, "language", None) if args else None
+    language = language_override or os.environ.get("WHISPER_LANG", "pl")
+
+    vad_override = getattr(args, "vad_filter", None) if args else None
+    vad_filter = vad_override if vad_override is not None else _strtobool_env(os.environ.get("WHISPER_VAD"), True)
     vad_parameters = {"min_silence_duration_ms": 500, "padding_duration_ms": 120}
-    sanitize_lower_noise = _strtobool_env(os.environ.get("SANITIZE_LOWER_NOISE"), False)
-    align_words = _strtobool_env(os.environ.get("WHISPER_ALIGN"), False)
+    sanitize_override = getattr(args, "sanitize_lower_noise", None) if args else None
+    sanitize_lower_noise = (
+        sanitize_override
+        if sanitize_override is not None
+        else _strtobool_env(os.environ.get("SANITIZE_LOWER_NOISE"), False)
+    )
+    align_override = getattr(args, "align_words", None) if args else None
+    align_words = align_override if align_override is not None else _strtobool_env(os.environ.get("WHISPER_ALIGN"), False)
 
     return TranscribeConfig(
         recordings_dir=recordings_dir,
@@ -416,9 +530,11 @@ def _relative_session_path(config: TranscribeConfig, session_dir: Path) -> Path:
 def main():
     """Generate per-user and global transcripts for the selected session."""
 
+    args = parse_args()
     narrator = NarrativeLogger()
-    narrator.log_start("Konfiguracja transkrypcji", {"źródło": "zmienne środowiskowe"})
-    config = load_config()
+    source = "argumenty CLI + zmienne środowiskowe" if _cli_overrides(args) else "zmienne środowiskowe"
+    narrator.log_start("Konfiguracja transkrypcji", {"źródło": source})
+    config = load_config(args)
     narrator.log_event(
         "Sprawdzam katalogi robocze",
         {
