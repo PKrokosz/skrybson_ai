@@ -38,6 +38,7 @@ Po starcie kontenera w logach powinno pojawić się potwierdzenie wykrycia GPU (
 - Jeżeli GPU nie jest dostępne, aplikacja automatycznie przełącza się na CPU z modelem `medium` i trybem `int8`.
 - Parametr wiązki segmentów można sterować przez `WHISPER_SEGMENT_BEAM` (domyślnie `5`).
 - Filtr VAD włącza się/wyłącza zmienną `WHISPER_VAD` (`on` domyślnie).
+- Precyzyjne znaczniki słów (WhisperX) aktywujesz przez `WHISPER_ALIGN=1` (wymaga dodatkowych modeli align/pyannote).
 
 ## Rozwiązywanie problemów
 - Brak wykrytego GPU: sprawdź `nvidia-smi` zarówno w systemie gospodarza, jak i wewnątrz kontenera.
