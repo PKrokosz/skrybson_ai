@@ -18,6 +18,16 @@ python transcribe.py
 ```
 Jeżeli chcesz korzystać z GPU, doinstaluj odpowiednią wersję PyTorch z obsługą CUDA (patrz runbook).
 
+### 1a. Proste GUI (Tkinter)
+
+Dla szybkiego uruchomienia transkrypcji bezpośrednio z komputera możesz skorzystać z prostego interfejsu graficznego opartego o Tkinter.
+
+```bash
+python gui.py
+```
+
+W oknie aplikacji wskaż katalog z nagraniami oraz folder wyjściowy (domyślnie `recordings/` i `out/`). Opcjonalnie wybierz konkretną sesję, urządzenie (`cuda`/`cpu`) oraz dodatkowe filtry.
+
 ### 2. Docker z GPU
 Dla środowisk z kartą NVIDIA dostępny jest plik `docker-compose.gpu.yml` oparty o obraz `ghcr.io/guillaumekln/faster-whisper:latest-cuda`.
 
