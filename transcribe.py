@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,88 @@ try:  # pragma: no cover - optional runtime dependency
     from faster_whisper import WhisperModel as _RuntimeWhisperModel
 except ImportError:  # pragma: no cover - handled at runtime
     _RuntimeWhisperModel = None
+
+
+class NarrativeLogger:
+    """Narrator weaving runtime events into a colourful logbook."""
+
+    _COLOR_NARRATION = "\033[94m"
+    _COLOR_EVENT = "\033[36m"
+    _COLOR_SUCCESS = "\033[92m"
+    _COLOR_REFLECTION = "\033[33m"
+    _RESET = "\033[0m"
+
+    def __init__(self) -> None:
+        self._process_t0 = time.perf_counter()
+        self._task_stack: List[tuple[str, float]] = []
+
+    def _timestamp(self) -> str:
+        elapsed = time.perf_counter() - self._process_t0
+        wall_clock = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        return f"[{wall_clock} | +{elapsed:7.2f}s]"
+
+    @staticmethod
+    def _format_context(context: Optional[Dict[str, object]]) -> str:
+        if not context:
+            return ""
+        fragments = []
+        for key, value in context.items():
+            fragments.append(f"{key}: {value}")
+        return " | ".join(fragments)
+
+    def log_start(self, task_name: str, details: Optional[Dict[str, object]] = None) -> None:
+        self._task_stack.append((task_name, time.perf_counter()))
+        ctx = self._format_context(details)
+        narrative = (
+            f"Skryba unosi pióro i rozpoczyna wyprawę '{task_name}'."
+            if not ctx
+            else f"Skryba unosi pióro i rozpoczyna wyprawę '{task_name}' ({ctx})."
+        )
+        print(f"{self._timestamp()} {self._COLOR_NARRATION}{narrative}{self._RESET}")
+
+    def log_event(self, event: str, context: Optional[Dict[str, object]] = None) -> None:
+        ctx = self._format_context(context)
+        storyline = (
+            f"Spoglądam na scenę: {event}."
+            if not ctx
+            else f"Spoglądam na scenę: {event} — {ctx}."
+        )
+        print(f"{self._timestamp()} {self._COLOR_EVENT}{storyline}{self._RESET}")
+
+    def log_result(
+        self,
+        result: str,
+        stats: Optional[Dict[str, object]] = None,
+        *,
+        reflection: Optional[str] = None,
+    ) -> None:
+        task_name = ""
+        duration = None
+        if self._task_stack:
+            task_name, start_t = self._task_stack.pop()
+            duration = time.perf_counter() - start_t
+
+        headline = (
+            f"Domykam kronikę etapu '{task_name}': {result}."
+            if task_name
+            else f"Domykam kronikę: {result}."
+        )
+        print(f"{self._timestamp()} {self._COLOR_SUCCESS}{headline}{self._RESET}")
+
+        block_lines = []
+        if duration is not None:
+            block_lines.append(f"czas: {duration:0.2f}s")
+        if stats:
+            for key, value in stats.items():
+                block_lines.append(f"{key}: {value}")
+        print("  == KONIEC ETAPU ==")
+        for line in block_lines:
+            print(f"    • {line}")
+
+        if reflection:
+            print(
+                f"{self._timestamp()} {self._COLOR_REFLECTION}Refleksja systemowa: {reflection}{self._RESET}"
+            )
 
 _NOISE_RE = re.compile(
     r"(?:^|\s)(?:[?!.,:;]\s*)*(?:uhm+|um+|eh+|eee+|yyy+)(?:\s*[?!.,:;])*(?=\s|$)",
@@ -333,20 +416,44 @@ def _relative_session_path(config: TranscribeConfig, session_dir: Path) -> Path:
 def main():
     """Generate per-user and global transcripts for the selected session."""
 
+    narrator = NarrativeLogger()
+    narrator.log_start("Konfiguracja transkrypcji", {"źródło": "zmienne środowiskowe"})
     config = load_config()
+    narrator.log_event(
+        "Sprawdzam katalogi robocze",
+        {
+            "nagrania": config.recordings_dir,
+            "wyniki": config.output_dir,
+        },
+    )
 
     if not config.recordings_dir.exists():
-        print(f"[!] Brak katalogu nagrań: {config.recordings_dir}")
+        narrator.log_event("Nie odnajduję katalogu nagrań", {"ścieżka": config.recordings_dir})
+        narrator.log_result(
+            "Konfiguracja zatrzymała się na brakujących nagraniach",
+            {"status": "brak recordings_dir"},
+            reflection="Czasem nawet Skryba nie zapisze historii, jeśli nie ma gdzie zajrzeć.",
+        )
         sys.exit(1)
 
     session_dir = _resolve_session_path(config)
     if not session_dir:
-        print("Brak sesji do transkrypcji.")
+        narrator.log_event("W archiwum cisza, brak bieżącej sesji", {"recordings": config.recordings_dir})
+        narrator.log_result(
+            "Nie znalazłem sesji do przepisania",
+            {"status": "brak katalogu sesji"},
+            reflection="Cisza w logach bywa równie wymowna jak najgłośniejsza sesja.",
+        )
         sys.exit(1)
 
     raw_dir = session_dir / "raw"
     if not raw_dir.exists():
-        print(f"[!] Brak katalogu z plikami RAW: {raw_dir}")
+        narrator.log_event("Sesja pozbawiona katalogu RAW", {"ścieżka": raw_dir})
+        narrator.log_result(
+            "Brak surowych danych uniemożliwił start",
+            {"status": "brak raw"},
+            reflection="Bez surowych fal głosowych nie powstanie żadna ballada.",
+        )
         sys.exit(1)
 
     output_session_dir = config.output_dir / _relative_session_path(config, session_dir)
@@ -356,70 +463,110 @@ def main():
     files = sorted(glob.glob(str(raw_dir / "*.wav")))
     files = [f for f in files if os.path.getsize(f) >= 1024]
     if not files:
-        print(f"[!] Brak sensownych plików WAV w {raw_dir} (>=1KB).")
+        narrator.log_event("W katalogu RAW panuje cisza", {"ścieżka": raw_dir})
+        narrator.log_result(
+            "Brak materiału do transkrypcji",
+            {"pliki_wav": 0},
+            reflection="Czasem najlepszą decyzją jest odnotować ciszę i ruszyć dalej.",
+        )
         sys.exit(0)
 
-    print(
-        "[policy] Urządzenie: żądano {requested} -> używam {device}".format(
-            requested=config.requested_device,
-            device=config.device,
-        )
+    narrator.log_event(
+        "Dobieram politykę wykonania",
+        {
+            "urządzenie": f"{config.requested_device}→{config.device}",
+            "model": config.model_size,
+            "compute": config.compute_type,
+            "beam": config.beam_size,
+        },
     )
-    print(
-        "[policy] Model: {model} @ {compute}".format(
-            model=config.model_size,
-            compute=config.compute_type,
-        )
+    narrator.log_event(
+        "Analizuję filtry i dodatki",
+        {
+            "VAD": "on" if config.vad_filter else "off",
+            "filtr_szumów": "on" if config.sanitize_lower_noise else "off",
+            "word_align": "on" if config.align_words else "off",
+            "język": config.language,
+        },
     )
-    print(
-        "[policy] Beam: {beam} (WHISPER_SEGMENT_BEAM) | VAD: {vad} (WHISPER_VAD)".format(
-            beam=config.beam_size,
-            vad="on" if config.vad_filter else "off",
-        )
-    )
-    print(
-        "[policy] Filtr szumów (SANITIZE_LOWER_NOISE): {state}".format(
-            state="on" if config.sanitize_lower_noise else "off",
-        )
-    )
-    print(
-        "[policy] Word alignment (WHISPER_ALIGN): {state}".format(
-            state="on" if config.align_words else "off",
-        )
-    )
-    print(f"[i] Sesja: {session_dir}")
-    print(f"[i] Język rozpoznawania: {config.language}")
 
-    manifest_path = session_dir / "manifest.json"
-    manifest: Dict[str, object] = {}
-    manifest_start_iso = None
-    if manifest_path.exists():
-        try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                manifest = json.load(f)
-            manifest_start_iso = manifest.get("startISO")
-        except (json.JSONDecodeError, OSError) as exc:
-            print(f"[!] Nie udało się odczytać manifestu {manifest_path}: {exc}")
+    narrator.log_result(
+        "Konfiguracja gotowa",
+        {
+            "sesja": session_dir,
+            "katalog_wyjściowy": out_dir,
+            "pliki_wav": len(files),
+        },
+        reflection="Dobrze przygotowana mapa sprawia, że dalsza podróż staje się przyjemnością.",
+    )
 
+    narrator.log_start(
+        "Ładowanie modelu Whisper",
+        {
+            "model": config.model_size,
+            "device": config.device,
+            "compute": config.compute_type,
+        },
+    )
     try:
         whisper_model_cls = _require_whisper_model()
     except RuntimeError as exc:
-        print(f"[!] {exc}")
+        narrator.log_event("Nie mogę przywołać klasy modelu", {"powód": exc})
+        narrator.log_result(
+            "Ładowanie modelu nie powiodło się",
+            {"status": "brak faster-whisper"},
+            reflection="Nawet najcierpliwszy kronikarz potrzebuje narzędzi, by pisać dalej.",
+        )
         sys.exit(1)
 
-    model = whisper_model_cls(config.model_size, device=config.device, compute_type=config.compute_type)
+    try:
+        model = whisper_model_cls(
+            config.model_size,
+            device=config.device,
+            compute_type=config.compute_type,
+        )
+    except Exception as exc:  # pragma: no cover - runtime failure path
+        narrator.log_event("Model odmówił współpracy przy inicjalizacji", {"powód": exc})
+        narrator.log_result(
+            "Nie udało się rozgrzać rdzeni Whispera",
+            {"status": "inicjalizacja nieudana"},
+            reflection="Czasem trzeba odłożyć pióro, gdy pergamin zaczyna płonąć.",
+        )
+        raise
+
+    narrator.log_result(
+        "Model czeka w pogotowiu",
+        {"klasa": whisper_model_cls.__name__},
+        reflection="GPU mruczy z zadowoleniem, gotowa na falę fonemów.",
+    )
 
     aligner: Optional["WhisperWordAligner"] = None
     if config.align_words:
+        narrator.log_start(
+            "Przygotowanie alignera WhisperX",
+            {"język": config.language, "device": config.device},
+        )
         try:
             from align import AlignerConfig as WhisperAlignConfig, WhisperWordAligner
         except (RuntimeError, ImportError) as exc:
-            print(f"[!] WhisperX align nieaktywne: {exc}")
+            narrator.log_event("Aligner odmówił współpracy", {"powód": exc})
             config.align_words = False
+            narrator.log_result(
+                "Słowny alignment wyłączony",
+                {"status": "aligner niedostępny"},
+                reflection="Nawet bez słów-perł nasza opowieść może płynąć dalej.",
+            )
         else:
             aligner = WhisperWordAligner(
                 WhisperAlignConfig(device=config.device, language_code=config.language)
             )
+            narrator.log_result(
+                "Aligner przygotowany",
+                {"klasa": WhisperWordAligner.__name__},
+                reflection="Synchronizuję sylaby niczym dyrygent orkiestry czasu.",
+            )
+    else:
+        narrator.log_event("Pomijam alignment słów", {"status": "wyłączony"})
 
     buckets: Dict[str, list[str]] = {}
     for f in files:
@@ -427,17 +574,27 @@ def main():
         user_prefix = name.rsplit("_seg", 1)[0]
         buckets.setdefault(user_prefix, []).append(f)
 
+    narrator.log_start(
+        "Inferencja segmentów",
+        {"użytkownicy": len(buckets)},
+    )
+
     summary_index = []
     conversation_segments = []
-
     user_payloads = []
     manifest_transcripts: Dict[str, Dict[str, object]] = {}
+    users_processed = 0
+    total_segments = 0
 
     for user_prefix, wavs in buckets.items():
         wavs.sort(key=lambda x: os.path.getmtime(x))
         timeline = []
         raw_wavs: List[str] = []
-        print(f"\n=== START USER {user_prefix} ===")
+
+        narrator.log_event(
+            "Rozpoczynam nasłuch użytkownika",
+            {"użytkownik": user_prefix, "pliki": len(wavs)},
+        )
 
         id_candidate = user_prefix.rsplit("_", 1)[-1]
         if not id_candidate.isdigit():
@@ -447,7 +604,10 @@ def main():
         for wav in wavs:
             try:
                 file_t0 = os.path.getmtime(wav)
-                print(f"[file] {os.path.basename(wav)} mtime={file_t0}")
+                narrator.log_event(
+                    "Otwieram falę dźwięku",
+                    {"plik": os.path.basename(wav), "mtime": file_t0},
+                )
                 raw_wavs.append(os.path.relpath(wav, session_dir))
                 transcribe_kwargs = dict(
                     beam_size=config.beam_size,
@@ -470,8 +630,13 @@ def main():
                     }
                     item["pseudo_t"] = file_t0 + item["start"]
                     segment_items.append(item)
-                    print(
-                        f"  [seg] {wav} {item['start']:.2f}-{item['end']:.2f}s :: {clean_text}"
+                    narrator.log_event(
+                        "Segment dopisany do pergaminu",
+                        {
+                            "plik": os.path.basename(wav),
+                            "zakres_s": f"{item['start']:.2f}-{item['end']:.2f}",
+                            "tekst": clean_text,
+                        },
                     )
 
                 word_segments: List[List[Dict[str, object]]] = []
@@ -483,7 +648,10 @@ def main():
                     try:
                         word_segments = aligner.align_words(Path(wav), align_payload)
                     except Exception as exc:
-                        print(f"  [!] WhisperX align nie powiodło się dla {wav}: {exc}")
+                        narrator.log_event(
+                            "WhisperX nie zgrał słów",
+                            {"plik": os.path.basename(wav), "powód": exc},
+                        )
                         word_segments = []
 
                 for idx, item in enumerate(segment_items):
@@ -500,13 +668,16 @@ def main():
                         }
                     )
             except Exception as e:
-                print(f"[!] Pomijam uszkodzony plik: {wav} ({e})")
+                narrator.log_event(
+                    "Pomijam uszkodzony plik",
+                    {"plik": os.path.basename(wav), "powód": e},
+                )
                 continue
 
         timeline.sort(key=lambda x: x["pseudo_t"])
 
         if not timeline:
-            print(f"[!] Brak segmentów dla użytkownika {user_prefix}")
+            narrator.log_event("Brak segmentów po transkrypcji", {"użytkownik": user_prefix})
             continue
 
         deduped = []
@@ -515,78 +686,82 @@ def main():
         for item in timeline:
             nt = norm_text(item["text"])
             if deduped and nt == last_norm and (item["pseudo_t"] - last_t) < 1.5:
-                print(f"  [dup] Pomijam duplikat: {item['text']}")
+                narrator.log_event(
+                    "Pomijam duplikat wypowiedzi",
+                    {"tekst": item["text"], "pseudo_t": item["pseudo_t"]},
+                )
                 continue
             deduped.append(item)
             last_norm = nt
             last_t = item["pseudo_t"]
+        timeline = deduped
 
-        t0 = deduped[0]["pseudo_t"]
+        session_segments = []
         segments_all = []
-        for it in deduped:
-            relative_to_user = round(it["pseudo_t"] - t0, 2)
-            duration = it["end"] - it["start"]
-            segment = {
-                "start": relative_to_user,
-                "end": round(relative_to_user + duration, 2),
-                "text": it["text"],
-                "session_epoch": it["pseudo_t"],
-            }
-            if config.align_words:
-                words_audio = it.get("words_audio") or []
-                offset = relative_to_user - it["start"]
-                words_relative = []
-                for word in words_audio:
-                    w_text = word.get("text")
-                    w_start = word.get("start")
-                    w_end = word.get("end")
-                    if not w_text or w_start is None or w_end is None:
-                        continue
-                    start_time = float(w_start) + offset
-                    end_time = float(w_end) + offset
-                    words_relative.append(
-                        {
-                            "text": str(w_text),
-                            "start": round(start_time, 3),
-                            "end": round(end_time, 3),
-                        }
-                    )
-                if words_relative:
-                    segment["words"] = words_relative
-            segments_all.append(segment)
-            conversation_segments.append({
+        user_id = user_prefix.rsplit("_", 1)[-1]
+        for item in timeline:
+            conversation_segments.append(
+                {
+                    "user": user_prefix,
+                    "text": item["text"],
+                    "start": item["pseudo_t"],
+                    "end": item["pseudo_t"] + (item["end"] - item["start"]),
+                    "files": [item["file"]],
+                    "user_id": user_id,
+                }
+            )
+            segments_all.append(
+                {
+                    "start": item["start"],
+                    "end": item["end"],
+                    "text": item["text"],
+                    "file": item["file"],
+                    "session_epoch": item["pseudo_t"],
+                    "words": item.get("words_audio", []),
+                }
+            )
+            session_segments.append(
+                {
+                    "start": item["pseudo_t"],
+                    "end": item["pseudo_t"] + (item["end"] - item["start"]),
+                    "text": item["text"],
+                }
+            )
+
+        write_srt(session_segments, out_dir / f"{file_stub}_session.srt")
+
+        user_payloads.append(
+            {
                 "user": user_prefix,
-                "user_id": id_candidate,
-                "text": it["text"],
-                "start": it["pseudo_t"],
-                "end": it["pseudo_t"] + duration,
-                "files": [it["file"]],
-            })
-
-        raw_wavs = sorted(set(raw_wavs))
-
-        segments_all = soft_merge_segments(segments_all, lower_noise=config.sanitize_lower_noise)
-        short_after = sum(1 for seg in segments_all if (seg["end"] - seg["start"]) < 1.0)
-        if segments_all:
-            short_ratio = short_after / len(segments_all)
-            if short_ratio > 0.2:
-                print(
-                    f"[!] Ostrzeżenie: {short_ratio:.0%} segmentów <1s po scaleniu dla {user_prefix}"
-                )
-
-        user_payloads.append({
-            "user": user_prefix,
-            "user_id": id_candidate,
-            "file_stub": file_stub,
-            "segments": segments_all,
-            "raw_files": raw_wavs,
-        })
+                "user_id": user_id,
+                "file_stub": file_stub,
+                "segments": segments_all,
+                "raw_files": raw_wavs,
+            }
+        )
         summary_index.append({"user": user_prefix, "segments": len(segments_all)})
+        total_segments += len(segments_all)
+        users_processed += 1
 
-        print(f"=== END USER {user_prefix} ===\n")
+        narrator.log_event(
+            "Zamykam rozdział użytkownika",
+            {"użytkownik": user_prefix, "segmenty": len(segments_all)},
+        )
 
     if not conversation_segments:
-        print("[!] Brak segmentów do zbudowania osi czasu rozmowy.")
+        narrator.log_event("Brak danych do osi czasu rozmowy", None)
+
+    narrator.log_result(
+        "Inferencja zakończona",
+        {
+            "użytkownicy": users_processed,
+            "segmenty": total_segments,
+            "globalne_segmenty": len(conversation_segments),
+        },
+        reflection="Po burzy fonemów zostają schludne akapity wspomnień.",
+    )
+
+    narrator.log_start("Postprocessing i budowa osi czasu", None)
 
     conversation_segments.sort(key=lambda item: item["start"])
     conversation_segments = soft_merge_segments(
@@ -598,13 +773,35 @@ def main():
     if conversation_segments:
         short_ratio = short_conv / len(conversation_segments)
         if short_ratio > 0.2:
-            print(f"[!] Ostrzeżenie: {short_ratio:.0%} globalnych segmentów <1s po scaleniu")
+            narrator.log_event(
+                "Wiele krótkich globalnych segmentów",
+                {"odsetek": f"{short_ratio:.0%}"},
+            )
+
+    manifest_path = session_dir / "manifest.json"
+    manifest: Dict[str, object] = {}
+    manifest_start_iso = None
+    if manifest_path.exists():
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+            manifest_start_iso = manifest.get("startISO")
+            narrator.log_event("Odczytałem manifest sesji", {"plik": manifest_path})
+        except (json.JSONDecodeError, OSError) as exc:
+            narrator.log_event("Manifest okazał się kapryśny", {"powód": exc})
 
     session_t0 = parse_iso_to_epoch(manifest_start_iso)
     if session_t0 is None and conversation_segments:
         session_t0 = conversation_segments[0]["start"]
+        first_segment_start = session_t0
         manifest_start_iso = (
-            datetime.fromtimestamp(session_t0, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+            datetime.fromtimestamp(first_segment_start, tz=timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        narrator.log_event(
+            "Szacuję początek sesji na bazie pierwszego segmentu",
+            {"epoch": session_t0},
         )
 
     timeline_payload = {
@@ -626,23 +823,38 @@ def main():
             absolute_start = (
                 datetime.fromtimestamp(seg["start"], tz=timezone.utc).isoformat().replace("+00:00", "Z")
             )
-            timeline_payload["segments"].append({
-                "user": seg["user"],
-                "user_id": seg.get("user_id"),
-                "text": seg["text"],
-                "start": relative_start,
-                "end": relative_end,
-                "absolute_start": absolute_start,
-                "files": seg.get("files", []),
-            })
+            timeline_payload["segments"].append(
+                {
+                    "user": seg["user"],
+                    "user_id": seg.get("user_id"),
+                    "text": seg["text"],
+                    "start": relative_start,
+                    "end": relative_end,
+                    "absolute_start": absolute_start,
+                    "files": seg.get("files", []),
+                }
+            )
 
     conversation_srt_segments: List[Dict[str, object]] = []
     for seg in conversation_segments:
-        conversation_srt_segments.append({
-            "start": seg["start"],
-            "end": seg["end"],
-            "text": f"{seg['user']}: {seg['text']}",
-        })
+        conversation_srt_segments.append(
+            {
+                "start": seg["start"],
+                "end": seg["end"],
+                "text": f"{seg['user']}: {seg['text']}",
+            }
+        )
+
+    narrator.log_result(
+        "Postprocessing zakończony",
+        {
+            "segmenty_po_scaleniu": len(conversation_segments),
+            "segmenty_timeline": len(timeline_payload["segments"]),
+        },
+        reflection="Fakty układają się w rozdziały niczym kartki spięte złotą nicią.",
+    )
+
+    narrator.log_start("Zapis wyników", {"folder": out_dir})
 
     for user_data in user_payloads:
         for seg in user_data["segments"]:
@@ -656,11 +868,18 @@ def main():
         }
         with open(user_json_path, "w", encoding="utf-8") as f:
             json.dump(json_payload, f, ensure_ascii=False, indent=2)
-        print(f"[✓] Zapisano: {user_json_path} ({len(user_data['segments'])} segmentów)")
+        narrator.log_event(
+            "Zapisuję indywidualny pergamin",
+            {"plik": user_json_path, "segmenty": len(user_data["segments"])},
+        )
         user_srt_path = out_dir / f"{user_data['file_stub']}.srt"
         user_vtt_path = out_dir / f"{user_data['file_stub']}.vtt"
         write_srt(user_data["segments"], user_srt_path)
         write_vtt(user_data["segments"], user_vtt_path)
+        narrator.log_event(
+            "Tworzę formaty SRT i VTT",
+            {"srt": user_srt_path, "vtt": user_vtt_path},
+        )
         manifest_transcripts[user_data["user_id"]] = {
             "wav_path": user_data["raw_files"],
             "json_path": os.path.relpath(user_json_path, session_dir),
@@ -672,22 +891,33 @@ def main():
         base_time = session_t0 if session_t0 is not None else conversation_srt_segments[0]["start"]
         conversation_srt_path = out_dir / "all_in_one.srt"
         write_srt(conversation_srt_segments, conversation_srt_path, base=base_time)
-        print(f"[✓] Globalne SRT: {conversation_srt_path}")
+        narrator.log_event("Generuję wspólne SRT", {"plik": conversation_srt_path})
 
     conversation_path = out_dir / "conversation.json"
     with open(conversation_path, "w", encoding="utf-8") as f:
         json.dump(timeline_payload, f, ensure_ascii=False, indent=2)
-    print(f"[✓] Globalna oś czasu: {conversation_path} ({len(timeline_payload['segments'])} wpisów)")
+    narrator.log_event(
+        "Aktualizuję globalną oś czasu",
+        {"plik": conversation_path, "wpisy": len(timeline_payload["segments"])},
+    )
 
     index_path = out_dir / "index.json"
     with open(index_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "session_dir": str(session_dir),
-            "generated_at": datetime.utcnow().isoformat() + "Z",
-            "items": summary_index,
-            "conversation_segments": len(timeline_payload["segments"]),
-        }, f, ensure_ascii=False, indent=2)
-    print(f"[✓] Gotowe. Index: {index_path}")
+        json.dump(
+            {
+                "session_dir": str(session_dir),
+                "generated_at": datetime.utcnow().isoformat() + "Z",
+                "items": summary_index,
+                "conversation_segments": len(timeline_payload["segments"]),
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+    narrator.log_event(
+        "Spisuję indeks",
+        {"plik": index_path, "użytkownicy": len(summary_index)},
+    )
 
     if manifest_transcripts:
         manifest.setdefault("transcripts", {})
@@ -695,9 +925,18 @@ def main():
         try:
             with open(manifest_path, "w", encoding="utf-8") as f:
                 json.dump(manifest, f, ensure_ascii=False, indent=2)
-            print(f"[✓] Uaktualniono manifest: {manifest_path}")
+            narrator.log_event("Odświeżam manifest", {"plik": manifest_path})
         except OSError as exc:
-            print(f"[!] Nie udało się zaktualizować manifestu: {exc}")
+            narrator.log_event("Manifest odmówił zapisu", {"powód": exc})
+
+    narrator.log_result(
+        "Zapisy zakończone",
+        {
+            "pliki_użytkowników": len(user_payloads),
+            "globalne_wpisy": len(timeline_payload["segments"]),
+        },
+        reflection="Archiwa napełniły się nowymi rozdziałami – można odkładać pióro.",
+    )
 
 if __name__ == "__main__":
     main()
