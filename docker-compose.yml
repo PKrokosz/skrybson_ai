@@ -1,0 +1,23 @@
+services:
+  discord-recorder:
+    build: .
+    container_name: discord-recorder
+    environment:
+      - DISCORD_TOKEN=MTQyMjE2MjM4MjM5ODE2NTAxMg.GHfZa7.44SM-D8jxZnD_vCv7o3Y0ViOGsHe5WJTB_aYZM
+      - RECORDINGS_DIR=${RECORDINGS_DIR}
+      - SESSION_PREFIX=${SESSION_PREFIX}
+    volumes:
+      - ./recordings:/app/recordings
+    restart: unless-stopped
+  transcriber:
+    image: python:3.11-slim
+    container_name: discord-transcriber
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - ./recordings:/app/recordings
+    environment:
+      - RECORDINGS_DIR=/app/recordings
+      - WHISPER_MODEL=small
+    command: bash -lc "pip install --no-cache-dir faster-whisper && python transcribe.py"
+    restart: "no"
