@@ -49,6 +49,23 @@ można nadpisywać poszczególne parametry (`WHISPER_MODEL`, `WHISPER_DEVICE`,
 
 Pełna lista dostępnych opcji: `python transcribe.py --help`.
 
+### GUI (Tkinter)
+
+Eksperymentalny interfejs graficzny oparty o Tkinter i ttkbootstrap możesz
+uruchomić poleceniem:
+
+```bash
+python -m ui.app
+```
+
+#### Skróty klawiszowe
+
+* `Ctrl+O` — wybór katalogu nagrań (`RECORDINGS_DIR`).
+* `Ctrl+R` — odśwież listę sesji.
+* `Ctrl+T` — przejdź do widoku transkrypcji.
+* `Ctrl+E` — otwórz widok wyników i eksportu.
+* `Ctrl+L` — otwórz logi.
+
 ## 📦 Artefakty wyjściowe
 
 Dla każdej ścieżki użytkownika powstają pliki `*.json`, `*.srt`, `*.vtt`, a w
