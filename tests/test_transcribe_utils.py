@@ -31,6 +31,7 @@ from transcribe import (
     norm_text,
     parse_iso_to_epoch,
     pick_latest_session,
+    parse_args,
     sanitize_text,
     soft_merge_segments,
     write_srt,
@@ -59,6 +60,71 @@ class ParseIntTest(unittest.TestCase):
     def test_parse_invalid_int(self) -> None:
         self.assertEqual(_parse_int("foo", 5), 5)
         self.assertEqual(_parse_int(None, 7), 7)
+
+
+class ParseArgsTest(unittest.TestCase):
+    def test_defaults_are_none(self) -> None:
+        parsed = parse_args([])
+
+        self.assertIsNone(parsed.recordings)
+        self.assertIsNone(parsed.output)
+        self.assertIsNone(parsed.session)
+        self.assertIsNone(parsed.profile)
+        self.assertIsNone(parsed.device)
+        self.assertIsNone(parsed.model)
+        self.assertIsNone(parsed.compute_type)
+        self.assertIsNone(parsed.beam_size)
+        self.assertIsNone(parsed.language)
+        self.assertIsNone(parsed.vad_filter)
+        self.assertIsNone(parsed.sanitize_lower_noise)
+        self.assertIsNone(parsed.align_words)
+
+    def test_all_arguments_override_defaults(self) -> None:
+        parsed = parse_args(
+            [
+                "--recordings",
+                "/tmp/rec",
+                "--output",
+                "/tmp/out",
+                "--session",
+                "/tmp/rec/session-a",
+                "--profile",
+                "ci-mock",
+                "--device",
+                "cpu",
+                "--model",
+                "tiny",
+                "--compute-type",
+                "int8",
+                "--beam-size",
+                "3",
+                "--language",
+                "en",
+                "--vad",
+                "--sanitize-lower-noise",
+                "--align-words",
+            ]
+        )
+
+        self.assertEqual(parsed.recordings, Path("/tmp/rec"))
+        self.assertEqual(parsed.output, Path("/tmp/out"))
+        self.assertEqual(parsed.session, Path("/tmp/rec/session-a"))
+        self.assertEqual(parsed.profile, "ci-mock")
+        self.assertEqual(parsed.device, "cpu")
+        self.assertEqual(parsed.model, "tiny")
+        self.assertEqual(parsed.compute_type, "int8")
+        self.assertEqual(parsed.beam_size, 3)
+        self.assertEqual(parsed.language, "en")
+        self.assertTrue(parsed.vad_filter)
+        self.assertTrue(parsed.sanitize_lower_noise)
+        self.assertTrue(parsed.align_words)
+
+    def test_negative_flags_disable_features(self) -> None:
+        parsed = parse_args(["--no-vad", "--keep-noise", "--no-align-words"])
+
+        self.assertFalse(parsed.vad_filter)
+        self.assertFalse(parsed.sanitize_lower_noise)
+        self.assertFalse(parsed.align_words)
 
 
 class SanitizeTextTest(unittest.TestCase):
