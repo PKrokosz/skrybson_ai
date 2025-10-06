@@ -1,0 +1,44 @@
+[project]
+name = "skrybson-ai"
+version = "0.1.0"
+description = "Local Discord transcription toolkit"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "faster-whisper>=0.10.0",
+]
+
+[project.optional-dependencies]
+align = [
+    "whisperx>=3.1.1",
+    "pyannote.audio>=2.1.1",
+]
+dev = [
+    "pytest>=8.4.1",
+    "ruff>=0.6.7",
+    "mypy>=1.11.2",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I"]
+ignore = ["E402", "E501"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+ignore_missing_imports = true
+warn_return_any = true
+warn_unused_ignores = true
+files = ["transcribe.py", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["align", "bench", "gui"]
+ignore_errors = true

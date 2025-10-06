@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, TYPE_CHECKING, Type
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Protocol, Sequence, Type, cast
 
 if TYPE_CHECKING:  # pragma: no cover - only for type hints
     from align import WhisperWordAligner
@@ -20,8 +20,11 @@ if TYPE_CHECKING:  # pragma: no cover - only for type hints
 else:  # pragma: no cover - runtime import guard
     _WhisperModelType = object
 
+_RuntimeWhisperModel: Optional[Type["_WhisperModelType"]] = None
 try:  # pragma: no cover - optional runtime dependency
-    from faster_whisper import WhisperModel as _RuntimeWhisperModel
+    from faster_whisper import WhisperModel as _ImportedWhisperModel
+
+    _RuntimeWhisperModel = cast(Type["_WhisperModelType"], _ImportedWhisperModel)
 except ImportError:  # pragma: no cover - handled at runtime
     _RuntimeWhisperModel = None
 
@@ -114,6 +117,16 @@ _NOISE_RE = re.compile(
 
 
 @dataclass
+class ModelAttempt:
+    """Single attempt to instantiate a Whisper model."""
+
+    device: str
+    model_size: str
+    compute_type: str
+    reason: str
+
+
+@dataclass
 class TranscribeConfig:
     """Runtime configuration for whisper transcription."""
 
@@ -130,12 +143,64 @@ class TranscribeConfig:
     vad_parameters: Dict[str, int]
     sanitize_lower_noise: bool
     align_words: bool
+    profile: Optional[str]
+    mock_transcriber: bool
+
+
+class WhisperSegment(Protocol):
+    start: float
+    end: float
+    text: str
 
 
 DEFAULT_POLICIES = {
     "cuda": {"model": "large-v3", "compute": "int8_float16"},
     "cpu": {"model": "medium", "compute": "int8"},
 }
+
+
+PROFILE_PRESETS: Dict[str, Dict[str, object]] = {
+    "quality@cuda": {
+        "device": "cuda",
+        "model": "large-v3",
+        "compute": "int8_float16",
+        "beam": 5,
+        "language": "pl",
+    },
+    "cpu-fallback": {
+        "device": "cpu",
+        "model": "medium",
+        "compute": "int8",
+        "beam": 3,
+        "language": "pl",
+    },
+    "ci-mock": {
+        "device": "cpu",
+        "model": "tiny",
+        "compute": "int8",
+        "beam": 1,
+        "language": "pl",
+        "mock": True,
+    },
+}
+
+
+OOM_SIGNATURES: Sequence[str] = (
+    "CUDA out of memory",
+    "CUDA error: out of memory",
+    "failed to allocate GPU memory",
+    "CUBLAS_STATUS_ALLOC_FAILED",
+    "OOM",
+)
+
+
+def _first_not_none(*values: Optional[str], default: Optional[str] = None) -> Optional[str]:
+    for value in values:
+        if value is not None:
+            stripped = str(value).strip()
+            if stripped:
+                return stripped
+    return default
 
 
 def _strtobool_env(value: Optional[str], default: bool) -> bool:
@@ -158,12 +223,12 @@ def _parse_int(value: Optional[str], default: int) -> int:
 
 def _cuda_available() -> bool:
     try:
-        import torch  # type: ignore
+        import torch
 
         return bool(getattr(torch.cuda, "is_available", lambda: False)())
     except ImportError:
         try:
-            import ctranslate2  # type: ignore
+            import ctranslate2
 
             return bool(getattr(ctranslate2, "has_cuda_device", lambda: False)())
         except ImportError:
@@ -198,6 +263,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "--session",
         type=Path,
         help="Konkretna sesja do przepisania (ścieżka względna lub absolutna)",
+    )
+    parser.add_argument(
+        "--profile",
+        choices=sorted(PROFILE_PRESETS.keys()),
+        help="Nazwa profilu uruchomieniowego (quality@cuda, cpu-fallback, ci-mock)",
     )
     parser.add_argument("--device", choices=["cuda", "cpu"], help="Preferowane urządzenie wykonania")
     parser.add_argument("--model", help="Wymuszony rozmiar modelu whisper (np. small, medium, large-v3)")
@@ -255,6 +325,7 @@ def _cli_overrides(args: Optional[argparse.Namespace]) -> bool:
         "recordings",
         "output",
         "session",
+        "profile",
         "device",
         "model",
         "compute_type",
@@ -291,9 +362,21 @@ def load_config(args: Optional[argparse.Namespace] = None) -> TranscribeConfig:
         raw_session = Path(session_env).expanduser()
         session_dir = raw_session if raw_session.is_absolute() else recordings_dir / raw_session
 
+    profile_override = getattr(args, "profile", None) if args else None
+    profile_env = os.environ.get("WHISPER_PROFILE")
+    profile_name = _first_not_none(profile_override, profile_env, default=None)
+    profile_defaults = PROFILE_PRESETS.get(profile_name or "", {})
+
     requested_device_override = getattr(args, "device", None) if args else None
-    requested_device_env = os.environ.get("WHISPER_DEVICE", "cuda")
-    requested_device = (requested_device_override or requested_device_env).strip().lower()
+    requested_device = (
+        _first_not_none(
+            requested_device_override,
+            os.environ.get("WHISPER_DEVICE"),
+            str(profile_defaults.get("device")) if profile_defaults else None,
+            "cuda",
+        )
+        or "cuda"
+    ).lower()
     if requested_device not in {"cuda", "cpu"}:
         print(
             f"[!] Nieznany WHISPER_DEVICE={requested_device}, używam domyślnego cuda.",
@@ -304,16 +387,23 @@ def load_config(args: Optional[argparse.Namespace] = None) -> TranscribeConfig:
     policy_defaults = DEFAULT_POLICIES[requested_device]
 
     model_override = getattr(args, "model", None) if args else None
-    model_env = os.environ.get("WHISPER_MODEL") if model_override is None else model_override
-    model_size = model_env.strip() if model_env and str(model_env).strip() else policy_defaults["model"]
+    model_candidate = _first_not_none(
+        model_override,
+        os.environ.get("WHISPER_MODEL"),
+        str(profile_defaults.get("model")) if profile_defaults else None,
+    )
+    model_size = model_candidate or policy_defaults["model"]
 
     compute_override = getattr(args, "compute_type", None) if args else None
-    compute_type_env = os.environ.get("WHISPER_COMPUTE") if compute_override is None else compute_override
-    if compute_type_env is not None:
-        compute_type_env = compute_type_env.strip().lower()
-        if not compute_type_env:
-            compute_type_env = None
-    compute_type = (compute_type_env or policy_defaults["compute"]).lower()
+    compute_type = (
+        _first_not_none(
+            compute_override,
+            os.environ.get("WHISPER_COMPUTE"),
+            str(profile_defaults.get("compute")) if profile_defaults else None,
+            policy_defaults["compute"],
+        )
+        or policy_defaults["compute"]
+    ).lower()
 
     valid_compute_types = {"int8_float16", "int8", "float16"}
     if compute_type not in valid_compute_types:
@@ -340,10 +430,22 @@ def load_config(args: Optional[argparse.Namespace] = None) -> TranscribeConfig:
     if beam_override is not None:
         beam_size = max(1, beam_override)
     else:
-        beam_size = max(1, _parse_int(os.environ.get("WHISPER_SEGMENT_BEAM"), 5))
+        profile_beam = profile_defaults.get("beam") if profile_defaults else None
+        beam_size = max(
+            1,
+            _parse_int(
+                _first_not_none(os.environ.get("WHISPER_SEGMENT_BEAM"), str(profile_beam) if profile_beam else None),
+                5,
+            ),
+        )
 
     language_override = getattr(args, "language", None) if args else None
-    language = language_override or os.environ.get("WHISPER_LANG", "pl")
+    language_candidate = _first_not_none(
+        language_override,
+        os.environ.get("WHISPER_LANG"),
+        str(profile_defaults.get("language")) if profile_defaults else None,
+    )
+    language = language_candidate or "pl"
 
     vad_override = getattr(args, "vad_filter", None) if args else None
     vad_filter = vad_override if vad_override is not None else _strtobool_env(os.environ.get("WHISPER_VAD"), True)
@@ -356,6 +458,9 @@ def load_config(args: Optional[argparse.Namespace] = None) -> TranscribeConfig:
     )
     align_override = getattr(args, "align_words", None) if args else None
     align_words = align_override if align_override is not None else _strtobool_env(os.environ.get("WHISPER_ALIGN"), False)
+
+    mock_default = bool(profile_defaults.get("mock", False)) if profile_defaults else False
+    mock_transcriber = _strtobool_env(os.environ.get("WHISPER_MOCK"), mock_default)
 
     return TranscribeConfig(
         recordings_dir=recordings_dir,
@@ -371,7 +476,137 @@ def load_config(args: Optional[argparse.Namespace] = None) -> TranscribeConfig:
         vad_parameters=vad_parameters,
         sanitize_lower_noise=sanitize_lower_noise,
         align_words=align_words,
+        profile=profile_name,
+        mock_transcriber=mock_transcriber,
     )
+
+
+def _is_recoverable_model_error(exc: Exception) -> bool:
+    message = str(exc)
+    if isinstance(exc, MemoryError):
+        return True
+    return any(signature.lower() in message.lower() for signature in OOM_SIGNATURES)
+
+
+def build_model_attempts(config: TranscribeConfig) -> List[ModelAttempt]:
+    """Construct a list of model attempts with graceful degradation."""
+
+    attempts: List[ModelAttempt] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def _add(device: str, model_size: str, compute_type: str, reason: str) -> None:
+        key = (device, model_size, compute_type)
+        if key in seen:
+            return
+        seen.add(key)
+        attempts.append(
+            ModelAttempt(
+                device=device,
+                model_size=model_size,
+                compute_type=compute_type,
+                reason=reason,
+            )
+        )
+
+    _add(config.device, config.model_size, config.compute_type, "konfiguracja bazowa")
+
+    if config.device == "cuda":
+        _add("cuda", config.model_size, "int8", "cuda: wymuszam int8 po OOM")
+        _add("cuda", "medium", "int8_float16", "cuda: zmniejszam model do medium")
+        _add("cuda", "medium", "int8", "cuda: medium + int8")
+
+    cpu_defaults = DEFAULT_POLICIES["cpu"]
+    _add("cpu", cpu_defaults["model"], cpu_defaults["compute"], "CPU fallback polityki")
+    _add("cpu", "small", "int8", "CPU minimalny")
+
+    return attempts
+
+
+class MockWhisperSegment:
+    def __init__(self, text: str, *, start: float = 0.0, end: float = 1.0) -> None:
+        self.text = text
+        self.start = start
+        self.end = end
+
+
+class MockWhisperModel:
+    """Lightweight mock used in CI to avoid downloading heavy models."""
+
+    def __init__(self, language: str = "pl") -> None:
+        self.language = language
+
+    def transcribe(self, audio_path: str, **_kwargs: object) -> tuple[List[MockWhisperSegment], Dict[str, object]]:
+        base_name = os.path.splitext(os.path.basename(audio_path))[0]
+        text = f"[mock:{self.language}] {base_name}"
+        segment = MockWhisperSegment(text=text)
+        return [segment], {"language": self.language}
+
+
+def _short_error(exc: Exception) -> str:
+    message = str(exc).strip().splitlines()[0] if str(exc).strip() else exc.__class__.__name__
+    return message[:160]
+
+
+def load_whisper_model(
+    config: TranscribeConfig,
+    narrator: NarrativeLogger,
+    whisper_model_cls: Type["_WhisperModelType"],
+) -> "_WhisperModelType":
+    """Load Whisper model honouring graceful degradation policies."""
+
+    if config.mock_transcriber:
+        narrator.log_event(
+            "Profil mock - pomijam ładowanie prawdziwego modelu",
+            {"język": config.language},
+        )
+        return MockWhisperModel(language=config.language)
+
+    attempts = build_model_attempts(config)
+    baseline_signature = f"{config.model_size}/{config.compute_type}@{config.device}"
+
+    for attempt in attempts:
+        narrator.log_event(
+            "Próba inicjalizacji wariantu",
+            {
+                "model": attempt.model_size,
+                "device": attempt.device,
+                "compute": attempt.compute_type,
+                "powód": attempt.reason,
+            },
+        )
+        try:
+            model = whisper_model_cls(
+                attempt.model_size,
+                device=attempt.device,
+                compute_type=attempt.compute_type,
+            )
+        except Exception as exc:  # pragma: no cover - runtime fallback
+            if _is_recoverable_model_error(exc):
+                narrator.log_event(
+                    "Model odrzucił wariant",
+                    {
+                        "powód": _short_error(exc),
+                        "próbowałem": f"{attempt.model_size}/{attempt.compute_type}@{attempt.device}",
+                    },
+                )
+                continue
+            raise
+
+        if attempt.reason != "konfiguracja bazowa":
+            narrator.log_event(
+                "Przełączam się na plan awaryjny",
+                {
+                    "wcześniej": baseline_signature,
+                    "teraz": f"{attempt.model_size}/{attempt.compute_type}@{attempt.device}",
+                },
+            )
+
+        config.device = attempt.device
+        config.model_size = attempt.model_size
+        config.compute_type = attempt.compute_type
+        return model
+
+    raise RuntimeError("Żaden wariant modelu nie został zainicjalizowany")
 
 
 def sanitize_text(text: str, *, lower_noise: bool = False) -> str:
@@ -409,9 +644,13 @@ def soft_merge_segments(
     for seg in segments[1:]:
         current = _clone_segment(seg)
         prev = merged[-1]
-        gap = float(current["start"]) - float(prev["end"])
-        current_duration = float(current["end"]) - float(current["start"])
-        prev_duration = float(prev["end"]) - float(prev["start"])
+        current_start = cast(float, current["start"])
+        current_end = cast(float, current["end"])
+        prev_start = cast(float, prev["start"])
+        prev_end = cast(float, prev["end"])
+        gap = current_start - prev_end
+        current_duration = current_end - current_start
+        prev_duration = prev_end - prev_start
         same_user = True
         if user_key is not None:
             same_user = prev.get(user_key) == current.get(user_key)
@@ -421,18 +660,21 @@ def soft_merge_segments(
             and 0 <= gap <= max_gap
             and (current_duration < short_threshold or prev_duration < short_threshold)
         ):
-            prev["end"] = max(float(prev["end"]), float(current["end"]))
+            prev["end"] = max(prev_end, current_end)
             prev_text = str(prev.get("text", ""))
             curr_text = str(current.get("text", ""))
             prev["text"] = sanitize_text(f"{prev_text} {curr_text}", lower_noise=lower_noise)
             if "files" in current:
                 prev.setdefault("files", [])
-                prev_files = list(prev.get("files", []))
-                prev_files.extend(current.get("files", []))
+                prev_files = list(cast(Iterable[str], prev.get("files", [])))
+                prev_files.extend(list(cast(Iterable[str], current.get("files", []))))
                 prev["files"] = prev_files
             if "words" in current or "words" in prev:
-                prev_words = list(prev.get("words", []))
-                prev_words.extend(current.get("words", []))
+                prev_words = list(
+                    cast(Iterable[Dict[str, object]], prev.get("words", []))
+                )
+                curr_words = cast(Iterable[Dict[str, object]], current.get("words", []))
+                prev_words.extend(list(curr_words))
                 prev["words"] = prev_words
             continue
 
@@ -596,6 +838,10 @@ def main():
             "beam": config.beam_size,
         },
     )
+    if config.profile:
+        narrator.log_event("Profil wykonania", {"profil": config.profile})
+    if config.mock_transcriber:
+        narrator.log_event("Tryb transkrypcji", {"wariant": "mock"})
     narrator.log_event(
         "Analizuję filtry i dodatki",
         {
@@ -622,10 +868,15 @@ def main():
             "model": config.model_size,
             "device": config.device,
             "compute": config.compute_type,
+            "profil": config.profile or "brak",
         },
     )
     try:
-        whisper_model_cls = _require_whisper_model()
+        whisper_model_cls: Type["_WhisperModelType"]
+        if config.mock_transcriber:
+            whisper_model_cls = cast(Type["_WhisperModelType"], MockWhisperModel)
+        else:
+            whisper_model_cls = _require_whisper_model()
     except RuntimeError as exc:
         narrator.log_event("Nie mogę przywołać klasy modelu", {"powód": exc})
         narrator.log_result(
@@ -636,23 +887,27 @@ def main():
         sys.exit(1)
 
     try:
-        model = whisper_model_cls(
-            config.model_size,
-            device=config.device,
-            compute_type=config.compute_type,
+        model = load_whisper_model(config, narrator, whisper_model_cls)
+    except RuntimeError as exc:  # pragma: no cover - skrajny przypadek
+        narrator.log_event(
+            "Wyczerpałem wszystkie warianty modelu",
+            {"powód": _short_error(exc)},
         )
-    except Exception as exc:  # pragma: no cover - runtime failure path
-        narrator.log_event("Model odmówił współpracy przy inicjalizacji", {"powód": exc})
         narrator.log_result(
             "Nie udało się rozgrzać rdzeni Whispera",
-            {"status": "inicjalizacja nieudana"},
+            {"status": "brak działających wariantów"},
             reflection="Czasem trzeba odłożyć pióro, gdy pergamin zaczyna płonąć.",
         )
-        raise
+        sys.exit(1)
 
     narrator.log_result(
         "Model czeka w pogotowiu",
-        {"klasa": whisper_model_cls.__name__},
+        {
+            "klasa": type(model).__name__,
+            "device": config.device,
+            "model": config.model_size,
+            "compute": config.compute_type,
+        },
         reflection="GPU mruczy z zadowoleniem, gotowa na falę fonemów.",
     )
 
@@ -663,7 +918,8 @@ def main():
             {"język": config.language, "device": config.device},
         )
         try:
-            from align import AlignerConfig as WhisperAlignConfig, WhisperWordAligner
+            from align import AlignerConfig as WhisperAlignConfig
+            from align import WhisperWordAligner
         except (RuntimeError, ImportError) as exc:
             narrator.log_event("Aligner odmówił współpracy", {"powód": exc})
             config.align_words = False
@@ -732,9 +988,10 @@ def main():
                 )
                 if config.vad_filter:
                     transcribe_kwargs["vad_parameters"] = config.vad_parameters
-                segments, _info = model.transcribe(wav, **transcribe_kwargs)
-                segment_items = []
-                for seg in segments:
+                raw_segments, _info = model.transcribe(wav, **transcribe_kwargs)
+                typed_segments = list(cast(Iterable[WhisperSegment], raw_segments))
+                segment_items: List[Dict[str, object]] = []
+                for seg in typed_segments:
                     clean_text = sanitize_text(seg.text, lower_noise=config.sanitize_lower_noise)
                     if not clean_text:
                         continue

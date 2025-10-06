@@ -1,71 +1,102 @@
 # Skrybson AI — Runbook
 
-Repozytorium zawiera narzędzia do transkrypcji nagrań Discorda przy użyciu biblioteki [faster-whisper](https://github.com/guillaumekln/faster-whisper).
+Transkrybent nagrań Discorda skupiony na jakości polskiej mowy. Repozytorium udostępnia
+skrypt CLI, który obrabia nagrania per użytkownik i generuje zestaw artefaktów
+(JSON, SRT, VTT oraz oś czasu całej rozmowy).
 
-## Szybki start
-- Przykładowa konfiguracja środowiska znajduje się w pliku `.env.example`.
-- Przed uruchomieniem upewnij się, że katalogi `recordings/` oraz `out/` istnieją.
+## 🚀 Szybki start
 
-## Tryby uruchomienia
-
-### 1. WSL (natywny Python)
-Szczegółowe kroki opisuje [Runbook WSL](docs/runbooks/wsl.md). W skrócie:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install faster-whisper
-python transcribe.py
+pip install -r requirements.txt  # opcjonalnie: pip install -r requirements-align.txt
+cp .env.example .env
+python transcribe.py --profile quality@cuda
 ```
 
-Wywołanie `transcribe.py` obsługuje teraz flagi CLI, dzięki czemu nie musisz eksportować zmiennych środowiskowych:
+Domyślna konfiguracja zakłada katalogi `./recordings` (wejście) i `./out`
+(wyjście). Wartości można nadpisać w `.env` lub flagami CLI.
+
+### Profile uruchomieniowe
+
+| Profil          | Urządzenie | Model      | Compute        | Zastosowanie                           |
+| --------------- | ---------- | ---------- | -------------- | -------------------------------------- |
+| `quality@cuda`  | CUDA       | large-v3   | int8_float16   | Maksymalna jakość na GPU ≥6 GiB VRAM   |
+| `cpu-fallback`  | CPU        | medium     | int8           | Tryb „po spotkaniu” bez GPU            |
+| `ci-mock`       | CPU        | mock/tiny  | int8 (mock)    | Błyskawiczne testy bez modeli ASR      |
+
+Profil można ustawić zmienną `WHISPER_PROFILE` lub flagą `--profile`. Wciąż
+można nadpisywać poszczególne parametry (`WHISPER_MODEL`, `WHISPER_DEVICE`,
+`WHISPER_COMPUTE`, `--beam-size`, `--language`, ...).
+
+### Kluczowe zmienne środowiskowe
+
+| Zmienna                | Opis                                                                 | Domyślna wartość |
+| ---------------------- | -------------------------------------------------------------------- | ---------------- |
+| `RECORDINGS_DIR`       | Główny katalog nagrań (manifest + katalogi sesji)                     | `./recordings`   |
+| `OUTPUT_DIR`           | Katalog wynikowy                                                     | `./out`          |
+| `SESSION_DIR`          | Wymuszenie konkretnej sesji (względnie względem `RECORDINGS_DIR`)    | ostatnia sesja   |
+| `WHISPER_PROFILE`      | Jeden z profili (`quality@cuda`, `cpu-fallback`, `ci-mock`)          | `quality@cuda`   |
+| `WHISPER_MODEL`        | Nazwa modelu whisper (np. `large-v3`, `medium`)                      | wg profilu       |
+| `WHISPER_DEVICE`       | `cuda` lub `cpu`                                                      | wg profilu       |
+| `WHISPER_COMPUTE`      | Tryb obliczeń (`int8_float16`, `int8`, `float16`)                    | wg profilu       |
+| `WHISPER_SEGMENT_BEAM` | Rozmiar wiązki segmentów                                              | `5`              |
+| `WHISPER_LANG`         | Język dekodera                                                        | `pl`             |
+| `WHISPER_VAD`          | Włączenie filtra VAD                                                  | `true`           |
+| `SANITIZE_LOWER_NOISE` | Redukcja drobnych wtrąceń („uhm”, „eee”)                              | `false`          |
+| `WHISPER_ALIGN`        | Alignment słów (wymaga pakietów z `requirements-align.txt`)          | `false`          |
+| `WHISPER_MOCK`         | Wymuszenie mocka nawet poza profilem `ci-mock`                        | `false`          |
+
+Pełna lista dostępnych opcji: `python transcribe.py --help`.
+
+## 📦 Artefakty wyjściowe
+
+Dla każdej ścieżki użytkownika powstają pliki `*.json`, `*.srt`, `*.vtt`, a w
+`transcripts/all_in_one.srt` otrzymasz wspólną oś czasu rozmowy. Segmenty są
+„soft-merge’owane”, dzięki czemu krótkie wtrącenia łączą się z sąsiadami, a
+znaczniki czasu pozostają spójne. W `conversation.json` znajdziesz oś czasu z
+względnymi odchyleniami od początku sesji oraz mapowanie na pliki źródłowe.
+
+W przypadku obecności `manifest.json` sesji, skrypt aktualizuje go o ścieżki do
+nowo wygenerowanych transkryptów.
+
+## 🧠 Strategie przełączania modeli
+
+1. **Wykrywanie środowiska.** Jeśli nie ma CUDA, aplikacja przełącza się na
+   profil CPU (`medium @ int8`).
+2. **Obsługa OOM.** Próba inicjalizacji na GPU wykonuje sekwencję wariantów:
+   `large-v3 @ int8_float16` → `large-v3 @ int8` → `medium @ int8_float16` →
+   `medium @ int8` → fallback CPU. Wszystkie kroki są logowane.
+3. **Profil `ci-mock`.** Tworzony jest lekki model mockujący odpowiedzi (bez
+   pobierania modeli ASR); przydaje się w CI oraz przy szybkim smoke-teście
+   pipeline’u.
+
+## 🛠️ Workflow developera
 
 ```bash
-python transcribe.py \
-  --recordings recordings/2024-09-01 \
-  --output out \
-  --device cpu \
-  --model medium \
-  --beam-size 3
+pip install -r requirements-dev.txt
+ruff check .
+mypy .
+pytest
 ```
 
-Pełną listę dostępnych opcji znajdziesz w `python transcribe.py --help`.
-Jeżeli chcesz korzystać z GPU, doinstaluj odpowiednią wersję PyTorch z obsługą CUDA (patrz runbook).
+Zestaw powyżej jest identyczny z GitHub Actions (`.github/workflows/ci.yml`).
+Testy operują na danych generowanych w locie i nie wymagają realnych modeli.
 
-### 1a. Proste GUI (Tkinter)
+### Przydatne profile i runbooki
 
-Dla szybkiego uruchomienia transkrypcji bezpośrednio z komputera możesz skorzystać z prostego interfejsu graficznego opartego o Tkinter.
+- `python transcribe.py --profile quality@cuda` — produkcyjna jakość na GPU.
+- `python transcribe.py --profile cpu-fallback` — tryb offline na CPU.
+- `python transcribe.py --profile ci-mock` — szybkie sprawdzenie pipeline’u bez
+  zależności ASR.
+- Dokument WSL: [`docs/runbooks/wsl.md`](docs/runbooks/wsl.md)
+- Benchmark: [`docs/bench.md`](docs/bench.md)
 
-```bash
-python gui.py
-```
+## 🔒 Bezpieczeństwo
 
-W oknie aplikacji wskaż katalog z nagraniami oraz folder wyjściowy (domyślnie `recordings/` i `out/`). Opcjonalnie wybierz konkretną sesję, urządzenie (`cuda`/`cpu`) oraz dodatkowe filtry.
+Plik `.env` nie jest wersjonowany. Uzupełnij tylko `.env.example`, a szczegóły
+trzymania sekretów opisuje [`SECURITY.md`](SECURITY.md).
 
-### 2. Docker z GPU
-Dla środowisk z kartą NVIDIA dostępny jest plik `docker-compose.gpu.yml` oparty o obraz `ghcr.io/guillaumekln/faster-whisper:latest-cuda`.
+## 📑 Licencja
 
-Uruchomienie:
-```bash
-docker compose -f docker-compose.gpu.yml up
-```
-
-Montowane są katalogi:
-- `./recordings` → `/app/recordings`
-- `./out` → `/app/out`
-- całe repozytorium → `/app`
-
-Po starcie kontenera w logach powinno pojawić się potwierdzenie wykrycia GPU (np. wyjście `nvidia-smi` lub informacja `cuda` z biblioteki CTranslate2).
-
-## Polityka modeli i strojenie
-- Domyślnie (CUDA) używany jest model `large-v3` z trybem `int8_float16`.
-- Jeżeli GPU nie jest dostępne, aplikacja automatycznie przełącza się na CPU z modelem `medium` i trybem `int8`.
-- Parametr wiązki segmentów można sterować przez `WHISPER_SEGMENT_BEAM` (domyślnie `5`).
-- Filtr VAD włącza się/wyłącza zmienną `WHISPER_VAD` (`on` domyślnie).
-- Precyzyjne znaczniki słów (WhisperX) aktywujesz przez `WHISPER_ALIGN=1` (wymaga dodatkowych modeli align/pyannote).
-
-## Rozwiązywanie problemów
-- Brak wykrytego GPU: sprawdź `nvidia-smi` zarówno w systemie gospodarza, jak i wewnątrz kontenera.
-- Wolna transkrypcja: ustaw `WHISPER_MODEL` na mniejszy (np. `medium` lub `small`) albo wymuś `WHISPER_DEVICE=cpu`.
-
-## Licencja
-Projekt korzysta z tych samych zasad licencyjnych co `faster-whisper`.
+Repozytorium korzysta z tej samej licencji co `faster-whisper`.
