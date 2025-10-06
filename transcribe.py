@@ -10,7 +10,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from faster_whisper import WhisperModel
 
@@ -29,6 +29,7 @@ class TranscribeConfig:
     language: str
     vad_filter: bool
     vad_parameters: Dict[str, int]
+    sanitize_lower_noise: bool
 
 
 def _strtobool_env(value: Optional[str], default: bool) -> bool:
@@ -87,6 +88,7 @@ def load_config() -> TranscribeConfig:
     language = os.environ.get("WHISPER_LANG", "pl")
     vad_filter = _strtobool_env(os.environ.get("WHISPER_VAD"), True)
     vad_parameters = {"min_silence_duration_ms": 500, "padding_duration_ms": 120}
+    sanitize_lower_noise = _strtobool_env(os.environ.get("SANITIZE_LOWER_NOISE"), False)
 
     if requested_device == "cuda" and not _cuda_available():
         print(
@@ -108,7 +110,106 @@ def load_config() -> TranscribeConfig:
         language=language,
         vad_filter=vad_filter,
         vad_parameters=vad_parameters,
+        sanitize_lower_noise=sanitize_lower_noise,
     )
+
+
+def sanitize_text(text: str, *, lower_noise: bool = False) -> str:
+    """Normalise whitespace and tame repeated punctuation."""
+
+    text = re.sub(r"\s+", " ", text.strip())
+    text = re.sub(r"([?!.,:;])\1+", r"\1", text)
+    text = re.sub(r"\s+([?!.,:;])", r"\1", text)
+    if lower_noise:
+        text = re.sub(r"\b(uhm+|um+|eh+|eee+|yyy+)\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s{2,}", " ", text).strip()
+    return text
+
+
+def soft_merge_segments(
+    segments: List[Dict[str, object]],
+    *,
+    user_key: Optional[str] = None,
+    max_gap: float = 0.3,
+    short_threshold: float = 1.0,
+    lower_noise: bool = False,
+) -> List[Dict[str, object]]:
+    """Merge very short segments when they are close and share the same speaker."""
+
+    if not segments:
+        return []
+
+    merged: List[Dict[str, object]] = [dict(segments[0])]
+    for seg in segments[1:]:
+        current = dict(seg)
+        prev = merged[-1]
+        gap = float(current["start"]) - float(prev["end"])
+        current_duration = float(current["end"]) - float(current["start"])
+        prev_duration = float(prev["end"]) - float(prev["start"])
+        same_user = True
+        if user_key is not None:
+            same_user = prev.get(user_key) == current.get(user_key)
+
+        if (
+            same_user
+            and 0 <= gap <= max_gap
+            and (current_duration < short_threshold or prev_duration < short_threshold)
+        ):
+            prev["end"] = max(float(prev["end"]), float(current["end"]))
+            prev_text = str(prev.get("text", ""))
+            curr_text = str(current.get("text", ""))
+            prev["text"] = sanitize_text(f"{prev_text} {curr_text}", lower_noise=lower_noise)
+            if "files" in current:
+                prev.setdefault("files", [])
+                prev_files = list(prev.get("files", []))
+                prev_files.extend(current.get("files", []))
+                prev["files"] = prev_files
+            continue
+
+        merged.append(current)
+
+    return merged
+
+
+def _format_timestamp(seconds: float, *, separator: str) -> str:
+    seconds = max(0.0, seconds)
+    millis = int(round((seconds - int(seconds)) * 1000))
+    total_seconds = int(seconds)
+    if millis == 1000:
+        total_seconds += 1
+        millis = 0
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if separator == ",":
+        return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
+    return f"{hours:02}:{minutes:02}:{secs:02}.{millis:03}"
+
+
+def write_srt(segments: List[Dict[str, float]], path: Path, *, base: float = 0.0) -> None:
+    lines = []
+    for idx, seg in enumerate(segments, start=1):
+        start = float(seg["start"]) - base
+        end = float(seg["end"]) - base
+        lines.append(str(idx))
+        lines.append(
+            f"{_format_timestamp(start, separator=',')} --> {_format_timestamp(end, separator=',')}"
+        )
+        lines.append(str(seg.get("text", "")).strip())
+        lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def write_vtt(segments: List[Dict[str, float]], path: Path, *, base: float = 0.0) -> None:
+    lines = ["WEBVTT", ""]
+    for seg in segments:
+        start = float(seg["start"]) - base
+        end = float(seg["end"]) - base
+        lines.append(
+            f"{_format_timestamp(start, separator='.')} --> {_format_timestamp(end, separator='.')}"
+        )
+        lines.append(str(seg.get("text", "")).strip())
+        lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
 
 def pick_latest_session(recordings_dir: Path) -> Optional[Path]:
     """Return the newest recording session directory in ``recordings_dir``."""
@@ -199,6 +300,7 @@ def main():
     )
 
     manifest_path = session_dir / "manifest.json"
+    manifest: Dict[str, object] = {}
     manifest_start_iso = None
     if manifest_path.exists():
         try:
@@ -220,16 +322,24 @@ def main():
     conversation_segments = []
 
     user_payloads = []
+    manifest_transcripts: Dict[str, Dict[str, object]] = {}
 
     for user_prefix, wavs in buckets.items():
         wavs.sort(key=lambda x: os.path.getmtime(x))
         timeline = []
+        raw_wavs: List[str] = []
         print(f"\n=== START USER {user_prefix} ===")
+
+        id_candidate = user_prefix.rsplit("_", 1)[-1]
+        if not id_candidate.isdigit():
+            id_candidate = re.sub(r"[^0-9A-Za-z]+", "_", user_prefix).strip("_") or user_prefix
+        file_stub = f"user_{id_candidate}"
 
         for wav in wavs:
             try:
                 file_t0 = os.path.getmtime(wav)
                 print(f"[file] {os.path.basename(wav)} mtime={file_t0}")
+                raw_wavs.append(os.path.relpath(wav, session_dir))
                 transcribe_kwargs = dict(
                     beam_size=config.beam_size,
                     language=config.language,
@@ -240,12 +350,17 @@ def main():
                 segments, _info = model.transcribe(wav, **transcribe_kwargs)
                 for seg in segments:
                     pseudo_t = file_t0 + float(seg.start)
-                    print(f"  [seg] {wav} {seg.start:.2f}-{seg.end:.2f}s :: {seg.text.strip()}")
+                    clean_text = sanitize_text(seg.text, lower_noise=config.sanitize_lower_noise)
+                    if not clean_text:
+                        continue
+                    print(
+                        f"  [seg] {wav} {seg.start:.2f}-{seg.end:.2f}s :: {clean_text}"
+                    )
                     timeline.append({
                         "pseudo_t": pseudo_t,
                         "start": float(seg.start),
                         "end": float(seg.end),
-                        "text": seg.text.strip(),
+                        "text": clean_text,
                         "file": os.path.basename(wav),
                     })
             except Exception as e:
@@ -253,6 +368,10 @@ def main():
                 continue
 
         timeline.sort(key=lambda x: x["pseudo_t"])
+
+        if not timeline:
+            print(f"[!] Brak segmentów dla użytkownika {user_prefix}")
+            continue
 
         deduped = []
         last_norm = ""
@@ -280,15 +399,30 @@ def main():
             segments_all.append(segment)
             conversation_segments.append({
                 "user": user_prefix,
+                "user_id": id_candidate,
                 "text": it["text"],
-                "pseudo_t": it["pseudo_t"],
-                "duration": duration,
-                "file": it["file"],
+                "start": it["pseudo_t"],
+                "end": it["pseudo_t"] + duration,
+                "files": [it["file"]],
             })
+
+        raw_wavs = sorted(set(raw_wavs))
+
+        segments_all = soft_merge_segments(segments_all, lower_noise=config.sanitize_lower_noise)
+        short_after = sum(1 for seg in segments_all if (seg["end"] - seg["start"]) < 1.0)
+        if segments_all:
+            short_ratio = short_after / len(segments_all)
+            if short_ratio > 0.2:
+                print(
+                    f"[!] Ostrzeżenie: {short_ratio:.0%} segmentów <1s po scaleniu dla {user_prefix}"
+                )
 
         user_payloads.append({
             "user": user_prefix,
+            "user_id": id_candidate,
+            "file_stub": file_stub,
             "segments": segments_all,
+            "raw_files": raw_wavs,
         })
         summary_index.append({"user": user_prefix, "segments": len(segments_all)})
 
@@ -297,12 +431,24 @@ def main():
     if not conversation_segments:
         print("[!] Brak segmentów do zbudowania osi czasu rozmowy.")
 
-    conversation_segments.sort(key=lambda item: item["pseudo_t"])
+    conversation_segments.sort(key=lambda item: item["start"])
+    conversation_segments = soft_merge_segments(
+        conversation_segments,
+        user_key="user",
+        lower_noise=config.sanitize_lower_noise,
+    )
+    short_conv = sum(1 for seg in conversation_segments if (seg["end"] - seg["start"]) < 1.0)
+    if conversation_segments:
+        short_ratio = short_conv / len(conversation_segments)
+        if short_ratio > 0.2:
+            print(f"[!] Ostrzeżenie: {short_ratio:.0%} globalnych segmentów <1s po scaleniu")
 
     session_t0 = parse_iso_to_epoch(manifest_start_iso)
     if session_t0 is None and conversation_segments:
-        session_t0 = conversation_segments[0]["pseudo_t"]
-        manifest_start_iso = datetime.fromtimestamp(session_t0, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+        session_t0 = conversation_segments[0]["start"]
+        manifest_start_iso = (
+            datetime.fromtimestamp(session_t0, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+        )
 
     timeline_payload = {
         "session_dir": str(session_dir),
@@ -318,25 +464,58 @@ def main():
                 duration = seg["end"] - seg["start"]
                 seg["relative_session_end"] = round(seg["relative_session_start"] + duration, 2)
         for seg in conversation_segments:
-            relative_start = round(seg["pseudo_t"] - session_t0, 2)
-            relative_end = round(relative_start + seg["duration"], 2)
-            absolute_start = datetime.fromtimestamp(seg["pseudo_t"], tz=timezone.utc).isoformat().replace("+00:00", "Z")
+            relative_start = round(seg["start"] - session_t0, 2)
+            relative_end = round(seg["end"] - session_t0, 2)
+            absolute_start = (
+                datetime.fromtimestamp(seg["start"], tz=timezone.utc).isoformat().replace("+00:00", "Z")
+            )
             timeline_payload["segments"].append({
                 "user": seg["user"],
+                "user_id": seg.get("user_id"),
                 "text": seg["text"],
                 "start": relative_start,
                 "end": relative_end,
                 "absolute_start": absolute_start,
-                "file": seg["file"],
+                "files": seg.get("files", []),
             })
+
+    conversation_srt_segments: List[Dict[str, object]] = []
+    for seg in conversation_segments:
+        conversation_srt_segments.append({
+            "start": seg["start"],
+            "end": seg["end"],
+            "text": f"{seg['user']}: {seg['text']}",
+        })
 
     for user_data in user_payloads:
         for seg in user_data["segments"]:
             seg.pop("session_epoch", None)
-        user_json_path = out_dir / f"{user_data['user']}.json"
+        user_json_path = out_dir / f"{user_data['file_stub']}.json"
+        json_payload = {
+            "user": user_data["user"],
+            "user_id": user_data["user_id"],
+            "segments": user_data["segments"],
+            "raw_files": user_data["raw_files"],
+        }
         with open(user_json_path, "w", encoding="utf-8") as f:
-            json.dump(user_data, f, ensure_ascii=False, indent=2)
+            json.dump(json_payload, f, ensure_ascii=False, indent=2)
         print(f"[✓] Zapisano: {user_json_path} ({len(user_data['segments'])} segmentów)")
+        user_srt_path = out_dir / f"{user_data['file_stub']}.srt"
+        user_vtt_path = out_dir / f"{user_data['file_stub']}.vtt"
+        write_srt(user_data["segments"], user_srt_path)
+        write_vtt(user_data["segments"], user_vtt_path)
+        manifest_transcripts[user_data["user_id"]] = {
+            "wav_path": user_data["raw_files"],
+            "json_path": os.path.relpath(user_json_path, session_dir),
+            "srt_path": os.path.relpath(user_srt_path, session_dir),
+            "vtt_path": os.path.relpath(user_vtt_path, session_dir),
+        }
+
+    if conversation_srt_segments:
+        base_time = session_t0 if session_t0 is not None else conversation_srt_segments[0]["start"]
+        conversation_srt_path = out_dir / "all_in_one.srt"
+        write_srt(conversation_srt_segments, conversation_srt_path, base=base_time)
+        print(f"[✓] Globalne SRT: {conversation_srt_path}")
 
     conversation_path = out_dir / "conversation.json"
     with open(conversation_path, "w", encoding="utf-8") as f:
@@ -352,6 +531,16 @@ def main():
             "conversation_segments": len(timeline_payload["segments"]),
         }, f, ensure_ascii=False, indent=2)
     print(f"[✓] Gotowe. Index: {index_path}")
+
+    if manifest_transcripts:
+        manifest.setdefault("transcripts", {})
+        manifest["transcripts"] = manifest_transcripts
+        try:
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, ensure_ascii=False, indent=2)
+            print(f"[✓] Uaktualniono manifest: {manifest_path}")
+        except OSError as exc:
+            print(f"[!] Nie udało się zaktualizować manifestu: {exc}")
 
 if __name__ == "__main__":
     main()
