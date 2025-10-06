@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-from whisperx import DiarizationPipeline, align as whisperx_align, load_align_model, load_audio
+from whisperx import DiarizationPipeline, load_align_model, load_audio
+from whisperx import align as whisperx_align
 
 
 class AlignmentError(RuntimeError):

@@ -8,15 +8,22 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from typing import cast
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from transcribe import (
+    MockWhisperModel,
+    ModelAttempt,
+    TranscribeConfig,
     _format_timestamp,
     _parse_int,
     _strtobool_env,
+    build_model_attempts,
+    load_config,
     norm_text,
     parse_iso_to_epoch,
     pick_latest_session,
@@ -91,7 +98,8 @@ class SoftMergeSegmentsTest(unittest.TestCase):
         first = merged[0]
         self.assertEqual(first["text"], "Cześć hej")
         self.assertEqual(first["files"], ["a.wav", "b.wav"])
-        self.assertEqual(len(first.get("words", [])), 2)
+        words = cast(list, first.get("words", []))
+        self.assertEqual(len(words), 2)
 
     def test_empty_input(self) -> None:
         self.assertEqual(soft_merge_segments([]), [])
@@ -131,6 +139,79 @@ class PickLatestSessionTest(unittest.TestCase):
             os.utime(second, None)
 
             self.assertEqual(pick_latest_session(base), second)
+
+
+class BuildModelAttemptsTest(unittest.TestCase):
+    def test_cuda_attempts_include_fallbacks(self) -> None:
+        cfg = TranscribeConfig(
+            recordings_dir=Path("/tmp/rec"),
+            output_dir=Path("/tmp/out"),
+            session_dir=None,
+            requested_device="cuda",
+            model_size="large-v3",
+            device="cuda",
+            compute_type="int8_float16",
+            beam_size=5,
+            language="pl",
+            vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 500},
+            sanitize_lower_noise=False,
+            align_words=False,
+            profile="quality@cuda",
+            mock_transcriber=False,
+        )
+
+        attempts = build_model_attempts(cfg)
+
+        self.assertEqual(
+            attempts[0],
+            ModelAttempt("cuda", "large-v3", "int8_float16", "konfiguracja bazowa"),
+        )
+        self.assertIn(
+            ModelAttempt("cuda", "large-v3", "int8", "cuda: wymuszam int8 po OOM"),
+            attempts,
+        )
+        self.assertIn(
+            ModelAttempt("cpu", "medium", "int8", "CPU fallback polityki"),
+            attempts,
+        )
+
+
+class LoadConfigProfileTest(unittest.TestCase):
+    def test_ci_mock_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            recordings_dir = Path(tmpdir) / "recordings"
+            output_dir = Path(tmpdir) / "out"
+            recordings_dir.mkdir()
+            output_dir.mkdir()
+            with patch.dict(
+                os.environ,
+                {
+                    "RECORDINGS_DIR": str(recordings_dir),
+                    "OUTPUT_DIR": str(output_dir),
+                    "WHISPER_PROFILE": "ci-mock",
+                },
+                clear=True,
+            ):
+                config = load_config(None)
+
+        self.assertEqual(config.profile, "ci-mock")
+        self.assertTrue(config.mock_transcriber)
+        self.assertEqual(config.device, "cpu")
+        self.assertEqual(config.model_size, "tiny")
+        self.assertEqual(config.compute_type, "int8")
+        self.assertEqual(config.beam_size, 1)
+        self.assertEqual(config.language, "pl")
+
+
+class MockWhisperModelTest(unittest.TestCase):
+    def test_mock_transcribe_returns_placeholder(self) -> None:
+        model = MockWhisperModel(language="pl")
+        segments, info = model.transcribe("foo/bar.wav")
+
+        self.assertEqual(len(segments), 1)
+        self.assertTrue(segments[0].text.startswith("[mock:pl]"))
+        self.assertEqual(info["language"], "pl")
 
 
 if __name__ == "__main__":  # pragma: no cover - manual execution

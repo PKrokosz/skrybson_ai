@@ -6,11 +6,10 @@ import queue
 import subprocess
 import sys
 import threading
-from pathlib import Path
-from typing import Dict, Optional
-
 import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from typing import Dict, Optional
 
 
 class TranscriptionWorker(threading.Thread):
