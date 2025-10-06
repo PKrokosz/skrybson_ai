@@ -10,12 +10,23 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING, Type
 
 if TYPE_CHECKING:  # pragma: no cover - only for type hints
     from align import WhisperWordAligner
+    from faster_whisper import WhisperModel as _WhisperModelType
+else:  # pragma: no cover - runtime import guard
+    _WhisperModelType = object
 
-from faster_whisper import WhisperModel
+try:  # pragma: no cover - optional runtime dependency
+    from faster_whisper import WhisperModel as _RuntimeWhisperModel
+except ImportError:  # pragma: no cover - handled at runtime
+    _RuntimeWhisperModel = None
+
+_NOISE_RE = re.compile(
+    r"(?:^|\s)(?:[?!.,:;]\s*)*(?:uhm+|um+|eh+|eee+|yyy+)(?:\s*[?!.,:;])*(?=\s|$)",
+    flags=re.IGNORECASE,
+)
 
 
 @dataclass
@@ -73,6 +84,22 @@ def _cuda_available() -> bool:
             return bool(getattr(ctranslate2, "has_cuda_device", lambda: False)())
         except ImportError:
             return False
+
+
+def _normalise_punctuation(text: str) -> str:
+    text = re.sub(r"([?!.,:;])\1+", r"\1", text)
+    text = re.sub(r"\s+([?!.,:;])", r"\1", text)
+    return text
+
+
+def _require_whisper_model() -> Type["_WhisperModelType"]:
+    """Return the Whisper model class or raise a runtime error."""
+
+    if _RuntimeWhisperModel is None:
+        raise RuntimeError(
+            "Brak zależności faster-whisper. Zainstaluj pakiet `faster-whisper`, aby korzystać z transkrypcji.",
+        )
+    return _RuntimeWhisperModel
 
 
 def load_config() -> TranscribeConfig:
@@ -154,11 +181,11 @@ def sanitize_text(text: str, *, lower_noise: bool = False) -> str:
     """Normalise whitespace and tame repeated punctuation."""
 
     text = re.sub(r"\s+", " ", text.strip())
-    text = re.sub(r"([?!.,:;])\1+", r"\1", text)
-    text = re.sub(r"\s+([?!.,:;])", r"\1", text)
+    text = _normalise_punctuation(text)
     if lower_noise:
-        text = re.sub(r"\b(uhm+|um+|eh+|eee+|yyy+)\b", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\s{2,}", " ", text).strip()
+        text = _NOISE_RE.sub(" ", text)
+        text = re.sub(r"\s{2,}", " ", text)
+        text = _normalise_punctuation(text).strip()
     return text
 
 
@@ -374,7 +401,13 @@ def main():
         except (json.JSONDecodeError, OSError) as exc:
             print(f"[!] Nie udało się odczytać manifestu {manifest_path}: {exc}")
 
-    model = WhisperModel(config.model_size, device=config.device, compute_type=config.compute_type)
+    try:
+        whisper_model_cls = _require_whisper_model()
+    except RuntimeError as exc:
+        print(f"[!] {exc}")
+        sys.exit(1)
+
+    model = whisper_model_cls(config.model_size, device=config.device, compute_type=config.compute_type)
 
     aligner: Optional["WhisperWordAligner"] = None
     if config.align_words:
