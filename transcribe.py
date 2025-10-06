@@ -10,7 +10,10 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - only for type hints
+    from align import WhisperWordAligner
 
 from faster_whisper import WhisperModel
 
@@ -31,6 +34,7 @@ class TranscribeConfig:
     vad_filter: bool
     vad_parameters: Dict[str, int]
     sanitize_lower_noise: bool
+    align_words: bool
 
 
 DEFAULT_POLICIES = {
@@ -127,6 +131,7 @@ def load_config() -> TranscribeConfig:
     vad_filter = _strtobool_env(os.environ.get("WHISPER_VAD"), True)
     vad_parameters = {"min_silence_duration_ms": 500, "padding_duration_ms": 120}
     sanitize_lower_noise = _strtobool_env(os.environ.get("SANITIZE_LOWER_NOISE"), False)
+    align_words = _strtobool_env(os.environ.get("WHISPER_ALIGN"), False)
 
     return TranscribeConfig(
         recordings_dir=recordings_dir,
@@ -141,6 +146,7 @@ def load_config() -> TranscribeConfig:
         vad_filter=vad_filter,
         vad_parameters=vad_parameters,
         sanitize_lower_noise=sanitize_lower_noise,
+        align_words=align_words,
     )
 
 
@@ -169,9 +175,15 @@ def soft_merge_segments(
     if not segments:
         return []
 
-    merged: List[Dict[str, object]] = [dict(segments[0])]
+    def _clone_segment(data: Dict[str, object]) -> Dict[str, object]:
+        cloned = dict(data)
+        if "words" in cloned and isinstance(cloned["words"], list):
+            cloned["words"] = [dict(word) for word in cloned["words"]]  # shallow copy
+        return cloned
+
+    merged: List[Dict[str, object]] = [_clone_segment(segments[0])]
     for seg in segments[1:]:
-        current = dict(seg)
+        current = _clone_segment(seg)
         prev = merged[-1]
         gap = float(current["start"]) - float(prev["end"])
         current_duration = float(current["end"]) - float(current["start"])
@@ -194,6 +206,10 @@ def soft_merge_segments(
                 prev_files = list(prev.get("files", []))
                 prev_files.extend(current.get("files", []))
                 prev["files"] = prev_files
+            if "words" in current or "words" in prev:
+                prev_words = list(prev.get("words", []))
+                prev_words.extend(current.get("words", []))
+                prev["words"] = prev_words
             continue
 
         merged.append(current)
@@ -339,6 +355,11 @@ def main():
             state="on" if config.sanitize_lower_noise else "off",
         )
     )
+    print(
+        "[policy] Word alignment (WHISPER_ALIGN): {state}".format(
+            state="on" if config.align_words else "off",
+        )
+    )
     print(f"[i] Sesja: {session_dir}")
     print(f"[i] Język rozpoznawania: {config.language}")
 
@@ -354,6 +375,18 @@ def main():
             print(f"[!] Nie udało się odczytać manifestu {manifest_path}: {exc}")
 
     model = WhisperModel(config.model_size, device=config.device, compute_type=config.compute_type)
+
+    aligner: Optional["WhisperWordAligner"] = None
+    if config.align_words:
+        try:
+            from align import AlignerConfig as WhisperAlignConfig, WhisperWordAligner
+        except (RuntimeError, ImportError) as exc:
+            print(f"[!] WhisperX align nieaktywne: {exc}")
+            config.align_words = False
+        else:
+            aligner = WhisperWordAligner(
+                WhisperAlignConfig(device=config.device, language_code=config.language)
+            )
 
     buckets: Dict[str, list[str]] = {}
     for f in files:
@@ -391,21 +424,48 @@ def main():
                 if config.vad_filter:
                     transcribe_kwargs["vad_parameters"] = config.vad_parameters
                 segments, _info = model.transcribe(wav, **transcribe_kwargs)
+                segment_items = []
                 for seg in segments:
-                    pseudo_t = file_t0 + float(seg.start)
                     clean_text = sanitize_text(seg.text, lower_noise=config.sanitize_lower_noise)
                     if not clean_text:
                         continue
-                    print(
-                        f"  [seg] {wav} {seg.start:.2f}-{seg.end:.2f}s :: {clean_text}"
-                    )
-                    timeline.append({
-                        "pseudo_t": pseudo_t,
+                    item = {
                         "start": float(seg.start),
                         "end": float(seg.end),
                         "text": clean_text,
                         "file": os.path.basename(wav),
-                    })
+                    }
+                    item["pseudo_t"] = file_t0 + item["start"]
+                    segment_items.append(item)
+                    print(
+                        f"  [seg] {wav} {item['start']:.2f}-{item['end']:.2f}s :: {clean_text}"
+                    )
+
+                word_segments: List[List[Dict[str, object]]] = []
+                if aligner and segment_items:
+                    align_payload = [
+                        {"start": it["start"], "end": it["end"], "text": it["text"]}
+                        for it in segment_items
+                    ]
+                    try:
+                        word_segments = aligner.align_words(Path(wav), align_payload)
+                    except Exception as exc:
+                        print(f"  [!] WhisperX align nie powiodło się dla {wav}: {exc}")
+                        word_segments = []
+
+                for idx, item in enumerate(segment_items):
+                    words_audio = word_segments[idx] if idx < len(word_segments) else []
+                    words_audio = [dict(word) for word in words_audio] if words_audio else []
+                    timeline.append(
+                        {
+                            "pseudo_t": item["pseudo_t"],
+                            "start": item["start"],
+                            "end": item["end"],
+                            "text": item["text"],
+                            "file": item["file"],
+                            "words_audio": words_audio,
+                        }
+                    )
             except Exception as e:
                 print(f"[!] Pomijam uszkodzony plik: {wav} ({e})")
                 continue
@@ -439,6 +499,27 @@ def main():
                 "text": it["text"],
                 "session_epoch": it["pseudo_t"],
             }
+            if config.align_words:
+                words_audio = it.get("words_audio") or []
+                offset = relative_to_user - it["start"]
+                words_relative = []
+                for word in words_audio:
+                    w_text = word.get("text")
+                    w_start = word.get("start")
+                    w_end = word.get("end")
+                    if not w_text or w_start is None or w_end is None:
+                        continue
+                    start_time = float(w_start) + offset
+                    end_time = float(w_end) + offset
+                    words_relative.append(
+                        {
+                            "text": str(w_text),
+                            "start": round(start_time, 3),
+                            "end": round(end_time, 3),
+                        }
+                    )
+                if words_relative:
+                    segment["words"] = words_relative
             segments_all.append(segment)
             conversation_segments.append({
                 "user": user_prefix,
