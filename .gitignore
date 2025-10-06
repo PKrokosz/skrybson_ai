@@ -1,5 +1,13 @@
+# Dependencies
 node_modules/
+
+# Environment files
 .env
+
+# Python artifacts
 __pycache__/
 *.pyc
-recordings/
+
+# Runtime output
+/recordings/
+/out/
