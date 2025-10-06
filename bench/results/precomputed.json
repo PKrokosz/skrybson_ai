@@ -1,0 +1,81 @@
+{
+  "generated_at": "2024-05-01T00:00:00Z",
+  "notes": "Symulowane wyniki lokalnego benchmarku na GPU RTX 4070 Ti",
+  "models": [
+    {
+      "name": "small",
+      "device": "cuda",
+      "compute_type": "int8",
+      "runs": [
+        {
+          "sample_id": "clean_planning_meeting",
+          "transcript": "Cześć wszystkim zaczynamy plan sprintu. W zeszłym tygodniu skończyliśmy migracje serwerów i dziś skupiamy się na zadaniach. Najpierw statusy Ania jak wdrożenie płatności? Moduł działa stabilnie i mamy zielone światło od compliance. Przechodzimy do raportu błędów Pawel widział zgłoszenia o logowaniu. Problem to przestarzałe tokeny i już jest poprawka. Marek przygotuj komunikat dla klientów zrobię to do końca dnia. Potem nowy dashboard potrzebujemy szkicu interfejsu i estymacji. Ania zbierze wymagania od sprzedaży jutro rano. Priorytety to logowanie potem dashboard i automatyczne raporty. Dzięki za spotkanie wracamy do pracy.",
+          "runtime_s": 205.4,
+          "max_vram_mib": 612
+        },
+        {
+          "sample_id": "noisy_open_space",
+          "transcript": "Hej musimy ustalić harmonogram wdrożenia nowej aplikacji. W tle drukarka i rozmowy ale skupmy się. Karolina czy mobilny zespół zakończył testy regresyjne prawie zostały dwa scenariusze powiadomień i wideo. Priorytet to naprawa błędu wysyłki wiadomości. Tomek masz poprawkę tak testuję ją teraz i wrzucę do gałęzi release. Pamiętajmy o dokumentacji Zosia możesz spisać instrukcję krok po kroku dla wsparcia jasne wyślę jutro rano. Pod koniec tygodnia spotkamy się by potwierdzić publikację.",
+          "runtime_s": 187.9,
+          "max_vram_mib": 598
+        },
+        {
+          "sample_id": "overlap_customer_support",
+          "transcript": "Dzień dobry tutaj wsparcie Skrybson klient zgłasza że po aktualizacji nie widzi historii czatów. Sprawdzam logi wygląda że indeksowanie nie przeszło na nowym serwerze. Druga linia pyta czy odtworzymy błąd na testach spróbuję wgrać kopię bazy. Klient pisze że problem dotyczy kont premium to zawęża obszar sprawdzę czy migracja uprawnień uwzględniła nowych użytkowników prosimy o cierpliwość pracujemy nad rozwiązaniem damy znać w godzinę.",
+          "runtime_s": 196.2,
+          "max_vram_mib": 605
+        }
+      ]
+    },
+    {
+      "name": "medium",
+      "device": "cuda",
+      "compute_type": "int8_float16",
+      "runs": [
+        {
+          "sample_id": "clean_planning_meeting",
+          "transcript": "Cześć wszystkim, zaczynamy planowanie sprintu. W zeszłym tygodniu zakończyliśmy migrację serwerów, więc dzisiaj skupimy się na zadaniach. Najpierw statusy: Ania, jak wygląda wdrożenie płatności? Moduł działa stabilnie i mamy zielone światło od compliance. Przejdźmy do raportu błędów. Paweł, widziałeś zgłoszenia dotyczące logowania? Problem dotyczył przestarzałych tokenów i poprawka już jest. Marek przygotuj komunikat dla klientów, zrobię go do końca dnia. Potem nowy dashboard, potrzebujemy szkicu interfejsu i estymacji czasu. Ania zbierze wymagania od sprzedaży jutro rano. Priorytety to logowanie, dashboard i automatyczne raporty. Dzięki za spotkanie, wracamy do pracy.",
+          "runtime_s": 132.8,
+          "max_vram_mib": 1034
+        },
+        {
+          "sample_id": "noisy_open_space",
+          "transcript": "Hej, musimy ustalić harmonogram wdrożenia nowej wersji aplikacji. W tle słychać drukarkę i rozmowy, ale spróbujmy się skupić. Karolina, czy zespół mobilny zakończył testy regresyjne? Prawie, zostały dwa scenariusze powiadomień push i wideo. Priorytetem jest naprawa błędu z wysyłką wiadomości. Tomek, masz już poprawkę? Tak, testuję ją teraz i wrzucę do gałęzi release. Pamiętajmy o dokumentacji. Zosia, spisz instrukcję krok po kroku dla działu wsparcia. Jasne, wyślę ją jutro rano. Pod koniec tygodnia spotkamy się, żeby potwierdzić datę publikacji.",
+          "runtime_s": 125.4,
+          "max_vram_mib": 1012
+        },
+        {
+          "sample_id": "overlap_customer_support",
+          "transcript": "Dzień dobry, tutaj dział wsparcia Skrybson. Klient zgłasza, że po aktualizacji nie widzi historii czatów. Sprawdzam logi, wygląda na to, że indeksowanie nie przeszło na nowym serwerze. Druga linia pyta, czy możemy odtworzyć błąd w środowisku testowym, spróbuję wgrać kopię bazy. Klient pisze, że problem dotyczy tylko kont premium, więc zawężamy obszar. Sprawdzę, czy migracja uprawnień uwzględniła nowych użytkowników. Prosimy o cierpliwość, pracujemy nad rozwiązaniem i damy znać w ciągu godziny.",
+          "runtime_s": 129.1,
+          "max_vram_mib": 1026
+        }
+      ]
+    },
+    {
+      "name": "large-v3",
+      "device": "cuda",
+      "compute_type": "int8_float16",
+      "runs": [
+        {
+          "sample_id": "clean_planning_meeting",
+          "transcript": "Cześć wszystkim, zaczynamy planowanie sprintu. W zeszłym tygodniu udało się nam zakończyć migrację serwerów, więc dzisiaj skupimy się na nowych zadaniach. Najpierw aktualizacja statusów: Ania, jak wygląda wdrożenie płatności? Dziękuję, moduł działa stabilnie i mamy zielone światła od compliance. Świetnie, to przejdźmy do raportu błędów. Paweł, widziałeś zgłoszenia z działu wsparcia dotyczące logowania? Tak, problem dotyczył przestarzałych tokenów i już wdrożyliśmy poprawkę. Marek, przygotuj proszę komunikat dla klientów. Dobrze, zrobię to do końca dnia. Kolejne zadanie to nowy dashboard. Potrzebujemy szkicu interfejsu i estymacji czasu. Ania, czy możesz zebrać wymagania od zespołu sprzedaży? Oczywiście, mam z nimi spotkanie jutro rano. Na koniec ustalamy priorytety: najpierw poprawki logowania, potem dashboard, a później automatyczne raporty. Dzięki za szybkie spotkanie, wracamy do pracy.",
+          "runtime_s": 98.6,
+          "max_vram_mib": 2114
+        },
+        {
+          "sample_id": "noisy_open_space",
+          "transcript": "Hej, musimy ustalić harmonogram wdrożenia nowej wersji aplikacji. W tle słychać drukarkę i rozmowy, ale spróbujmy się skupić. Karolina, czy zespół mobilny zakończył testy regresyjne? Prawie, zostały dwa scenariusze dotyczące powiadomień push i wideo. Dobrze, priorytetem jest naprawa błędu z wysyłką wiadomości. Tomek, masz już poprawkę? Tak, testuję ją teraz i do końca dnia wrzucę do gałęzi release. Świetnie, pamiętajmy też o aktualizacji dokumentacji. Zosia, czy możesz spisać instrukcję krok po kroku dla działu wsparcia? Jasne, wyślę wersję roboczą jutro rano. Pod koniec tygodnia spotkamy się jeszcze raz, żeby potwierdzić datę publikacji.",
+          "runtime_s": 94.2,
+          "max_vram_mib": 2089
+        },
+        {
+          "sample_id": "overlap_customer_support",
+          "transcript": "Dzień dobry, tutaj dział wsparcia Skrybson. Klient zgłasza, że po aktualizacji nie widzi historii czatów. Możesz sprawdzić logi? Już patrzę, wygląda na to, że indeksowanie nie przeszło na nowym serwerze. W tym samym czasie druga linia pyta, czy możemy odtworzyć błąd w środowisku testowym. Spróbuję wgrać kopię bazy. Czekaj, klient znów pisze, że problem dotyczy tylko kont premium. To zawęża obszar. Sprawdzę, czy migracja uprawnień uwzględniła nowych użytkowników. Proszę o cierpliwość, pracujemy nad rozwiązaniem i damy znać w ciągu godziny.",
+          "runtime_s": 96.1,
+          "max_vram_mib": 2108
+        }
+      ]
+    }
+  ]
+}
