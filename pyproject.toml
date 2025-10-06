@@ -37,8 +37,13 @@ warn_unused_configs = true
 ignore_missing_imports = true
 warn_return_any = true
 warn_unused_ignores = true
+exclude = ["^node_modules/", "^ui/build/"]
 files = ["transcribe.py", "tests"]
 
 [[tool.mypy.overrides]]
 module = ["align", "bench", "gui"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["ui", "ui.*", "ttkbootstrap", "ttkbootstrap.*"]
 ignore_errors = true

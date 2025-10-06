@@ -12,7 +12,7 @@ class DummyProcess:
     def __init__(self) -> None:
         self.stdout = io.BytesIO(b"log1\nlog2\n")
         self.stderr = io.BytesIO(b"err1\n")
-        self._returncode = None
+        self._returncode: int | None = None
 
     def wait(self) -> None:
         self._returncode = 0

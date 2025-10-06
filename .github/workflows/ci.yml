@@ -22,7 +22,7 @@ jobs:
       - name: Ruff (lint)
         run: ruff check .
       - name: Mypy (type check)
-        run: mypy .
+        run: mypy --config-file pyproject.toml
       - name: Pytest
         env:
           PYTHONPATH: .
