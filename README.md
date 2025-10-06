@@ -33,9 +33,15 @@ Montowane są katalogi:
 
 Po starcie kontenera w logach powinno pojawić się potwierdzenie wykrycia GPU (np. wyjście `nvidia-smi` lub informacja `cuda` z biblioteki CTranslate2).
 
+## Polityka modeli i strojenie
+- Domyślnie (CUDA) używany jest model `large-v3` z trybem `int8_float16`.
+- Jeżeli GPU nie jest dostępne, aplikacja automatycznie przełącza się na CPU z modelem `medium` i trybem `int8`.
+- Parametr wiązki segmentów można sterować przez `WHISPER_SEGMENT_BEAM` (domyślnie `5`).
+- Filtr VAD włącza się/wyłącza zmienną `WHISPER_VAD` (`on` domyślnie).
+
 ## Rozwiązywanie problemów
 - Brak wykrytego GPU: sprawdź `nvidia-smi` zarówno w systemie gospodarza, jak i wewnątrz kontenera.
-- Wolna transkrypcja: zmień `WHISPER_MODEL` na mniejszy (np. `medium` lub `small`) i dostosuj `WHISPER_COMPUTE`.
+- Wolna transkrypcja: ustaw `WHISPER_MODEL` na mniejszy (np. `medium` lub `small`) albo wymuś `WHISPER_DEVICE=cpu`.
 
 ## Licencja
 Projekt korzysta z tych samych zasad licencyjnych co `faster-whisper`.

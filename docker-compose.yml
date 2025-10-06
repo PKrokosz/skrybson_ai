@@ -21,13 +21,13 @@ services:
     environment:
       RECORDINGS_DIR: /app/recordings
       OUTPUT_DIR: /app/out
-      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
-      WHISPER_DEVICE: ${WHISPER_DEVICE:-cuda}
-      WHISPER_COMPUTE: ${WHISPER_COMPUTE:-int8_float16}
-      WHISPER_BEAM: ${WHISPER_BEAM:-5}
-      WHISPER_LANG: ${WHISPER_LANG:-pl}
-      WHISPER_VAD: ${WHISPER_VAD:-true}
-      SANITIZE_LOWER_NOISE: ${SANITIZE_LOWER_NOISE:-false}
+      WHISPER_MODEL: ${WHISPER_MODEL:-}
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-}
+      WHISPER_COMPUTE: ${WHISPER_COMPUTE:-}
+      WHISPER_SEGMENT_BEAM: ${WHISPER_SEGMENT_BEAM:-}
+      WHISPER_LANG: ${WHISPER_LANG:-}
+      WHISPER_VAD: ${WHISPER_VAD:-}
+      SANITIZE_LOWER_NOISE: ${SANITIZE_LOWER_NOISE:-}
     volumes:
       - ./:/app
       - ${RECORDINGS_DIR:-./recordings}:/app/recordings
