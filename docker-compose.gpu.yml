@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  transcriber:
+    image: ghcr.io/guillaumekln/faster-whisper:latest-cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
+      WHISPER_DEVICE: cuda
+      WHISPER_COMPUTE: ${WHISPER_COMPUTE:-float16}
+      WHISPER_BEAM: ${WHISPER_BEAM:-5}
+      WHISPER_LANG: ${WHISPER_LANG:-pl}
+      WHISPER_VAD: ${WHISPER_VAD:-1}
+      SANITIZE_LOWER_NOISE: ${SANITIZE_LOWER_NOISE:-0}
+    volumes:
+      - ./recordings:/app/recordings
+      - ./out:/app/out
+      - ./:/app
+    working_dir: /app
+    command: ["python", "transcribe.py"]
+    runtime: nvidia
