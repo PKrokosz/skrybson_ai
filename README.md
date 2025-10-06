@@ -16,6 +16,19 @@ source .venv/bin/activate
 pip install faster-whisper
 python transcribe.py
 ```
+
+Wywołanie `transcribe.py` obsługuje teraz flagi CLI, dzięki czemu nie musisz eksportować zmiennych środowiskowych:
+
+```bash
+python transcribe.py \
+  --recordings recordings/2024-09-01 \
+  --output out \
+  --device cpu \
+  --model medium \
+  --beam-size 3
+```
+
+Pełną listę dostępnych opcji znajdziesz w `python transcribe.py --help`.
 Jeżeli chcesz korzystać z GPU, doinstaluj odpowiednią wersję PyTorch z obsługą CUDA (patrz runbook).
 
 ### 1a. Proste GUI (Tkinter)
