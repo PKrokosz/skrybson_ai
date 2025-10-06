@@ -45,5 +45,5 @@ module = ["align", "bench", "gui"]
 ignore_errors = true
 
 [[tool.mypy.overrides]]
-module = ["ui", "ui.*", "ttkbootstrap", "ttkbootstrap.*"]
+module = ["ui", "ui.*"]
 ignore_errors = true

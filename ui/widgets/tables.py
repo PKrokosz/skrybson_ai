@@ -1,7 +1,7 @@
 """Table helpers."""
 from __future__ import annotations
 
-import ttkbootstrap as ttk
+from ui.bootstrap import ttk
 
 
 def striped_treeview(master: ttk.Widget, columns: tuple[str, ...], headings: dict[str, str]) -> ttk.Treeview:

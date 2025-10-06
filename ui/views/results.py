@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from tkinter import END, Text
 
-import ttkbootstrap as ttk
+from ui.bootstrap import ttk
 from ui.views.base import View
+from ui.widgets.textutil import END, create_text_widget
 
 
 class ResultsView(View):
@@ -19,8 +19,8 @@ class ResultsView(View):
         self.main_area.rowconfigure(0, weight=1)
         self.main_area.columnconfigure(0, weight=1)
 
-        self.srt_text = Text(self.notebook)
-        self.vtt_text = Text(self.notebook)
+        self.srt_text = create_text_widget(self.notebook)
+        self.vtt_text = create_text_widget(self.notebook)
         self.json_tree = ttk.Treeview(self.notebook, columns=("speaker", "start", "end", "text"), show="headings")
         for col in ("speaker", "start", "end", "text"):
             self.json_tree.heading(col, text=col.title())
@@ -47,7 +47,7 @@ class ResultsView(View):
         self._load_text_files(output_dir, "vtt", self.vtt_text)
         self._load_json(output_dir)
 
-    def _load_text_files(self, directory: Path, extension: str, widget: Text) -> None:
+    def _load_text_files(self, directory: Path, extension: str, widget: object) -> None:
         widget.delete("1.0", END)
         files = sorted(directory.glob(f"*.{extension}"))
         for path in files:

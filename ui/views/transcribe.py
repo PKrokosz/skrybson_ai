@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from tkinter import END, Text
 from typing import Dict
 
-import ttkbootstrap as ttk
+from ui.bootstrap import ttk
+from ui.widgets.textutil import END, create_text_widget
 from ui.services.tasks import TaskManager
 from ui.state import AppState
 from ui.views.base import View
@@ -18,7 +18,7 @@ class TranscribeView(View):
     def __init__(self, master: ttk.Widget, state: AppState, task_manager: TaskManager | None = None) -> None:
         self.task_manager = task_manager or TaskManager()
         self._env_vars: Dict[str, ttk.StringVar] = {}
-        self.log_widget: ttk.Text | None = None
+        self.log_widget: object | None = None
         super().__init__(master, state)
 
     def build(self) -> None:
@@ -37,8 +37,9 @@ class TranscribeView(View):
         self.queue_tree.grid(row=1, column=0, sticky="nsew")
         self.main_area.rowconfigure(1, weight=1)
         ttk.Label(self.main_area, text="Log").grid(row=2, column=0, sticky="w", pady=(8, 0))
-        self.log_widget = Text(self.main_area, height=14)
-        self.log_widget.grid(row=3, column=0, sticky="nsew")
+        self.log_widget = create_text_widget(self.main_area, height=14)
+        if self.log_widget:
+            self.log_widget.grid(row=3, column=0, sticky="nsew")
         self.main_area.rowconfigure(3, weight=1)
 
         if self.right_panel is None:
