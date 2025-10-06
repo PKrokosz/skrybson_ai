@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from tkinter import messagebox
 
-import ttkbootstrap as ttk
+from ui.bootstrap import ttk
 from ui.services.align import discover_alignment_candidates
 from ui.views.base import View
 

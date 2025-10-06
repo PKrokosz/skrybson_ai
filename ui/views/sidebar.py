@@ -3,8 +3,7 @@ from __future__ import annotations
 
 from typing import Callable, Dict
 
-import ttkbootstrap as ttk
-from ttkbootstrap.tooltip import ToolTip
+from ui.bootstrap import ToolTip, ttk
 from ui.icons import glyph_icon
 
 

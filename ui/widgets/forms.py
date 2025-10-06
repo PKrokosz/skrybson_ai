@@ -1,7 +1,7 @@
 """Form helpers."""
 from __future__ import annotations
 
-import ttkbootstrap as ttk
+from ui.bootstrap import ttk
 
 
 def labeled_entry(master: ttk.Widget, label: str, textvariable: ttk.StringVar) -> ttk.Frame:

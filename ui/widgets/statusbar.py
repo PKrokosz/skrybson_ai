@@ -1,7 +1,7 @@
 """Status bar widget."""
 from __future__ import annotations
 
-import ttkbootstrap as ttk
+from ui.bootstrap import ttk
 
 
 class StatusBar(ttk.Frame):

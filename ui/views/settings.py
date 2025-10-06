@@ -1,7 +1,7 @@
 """Settings view."""
 from __future__ import annotations
 
-import ttkbootstrap as ttk
+from ui.bootstrap import ttk
 from ui.views.base import View
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-import ttkbootstrap as ttk
+from ui.bootstrap import ttk
 from ui.views.base import View
 
 

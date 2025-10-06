@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Dict
 
-import ttkbootstrap as ttk
+from ui.bootstrap import ttk
 from ui.services.tasks import TaskManager
 from ui.state import AppState
 from ui.views.align import AlignView

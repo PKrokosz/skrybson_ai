@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 import json
-from tkinter import END, Text
 
-import ttkbootstrap as ttk
+from ui.bootstrap import ttk
 from ui.services.sessions import SessionSummary, discover_sessions
 from ui.state import AppState
 from ui.views.base import View
 from ui.widgets.dialogs import ask_directory
 from ui.widgets.tables import striped_treeview
+from ui.widgets.textutil import END, create_text_widget
 
 
 class SessionsView(View):
@@ -38,7 +38,7 @@ class SessionsView(View):
         )
         self.tree.grid(row=0, column=0, sticky="nsew")
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
-        self.preview = Text(self.main_area, height=12)
+        self.preview = create_text_widget(self.main_area, height=12)
         self.preview.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
         self.main_area.rowconfigure(1, weight=1)
 
