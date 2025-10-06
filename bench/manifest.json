@@ -1,0 +1,25 @@
+{
+  "samples": [
+    {
+      "id": "clean_planning_meeting",
+      "category": "clean",
+      "description": "Spotkanie planistyczne bez zakłóceń, jedna osoba mówi",
+      "audio_path": "bench/samples/clean_planning_meeting.wav",
+      "reference_text": "Cześć wszystkim, zaczynamy planowanie sprintu. W zeszłym tygodniu udało się nam zakończyć migrację serwerów, więc dzisiaj skupimy się na nowych zadaniach. Najpierw aktualizacja statusów: Ania, jak wygląda wdrożenie płatności? Dziękuję, moduł działa stabilnie i mamy zielone światła od compliance. Świetnie, to przejdźmy do raportu błędów. Paweł, widziałeś zgłoszenia z działu wsparcia dotyczące logowania? Tak, problem dotyczył przestarzałych tokenów i już wdrożyliśmy poprawkę. Marek, przygotuj proszę komunikat dla klientów. Dobrze, zrobię to do końca dnia. Kolejne zadanie to nowy dashboard. Potrzebujemy szkicu interfejsu i estymacji czasu. Ania, czy możesz zebrać wymagania od zespołu sprzedaży? Oczywiście, mam z nimi spotkanie jutro rano. Na koniec ustalamy priorytety: najpierw poprawki logowania, potem dashboard, a później automatyczne raporty. Dzięki za szybkie spotkanie, wracamy do pracy."
+    },
+    {
+      "id": "noisy_open_space",
+      "category": "noisy",
+      "description": "Spotkanie przy głośnym open space, w tle klimatyzacja i rozmowy",
+      "audio_path": "bench/samples/noisy_open_space.wav",
+      "reference_text": "Hej, musimy ustalić harmonogram wdrożenia nowej wersji aplikacji. W tle słychać drukarkę i rozmowy, ale spróbujmy się skupić. Karolina, czy zespół mobilny zakończył testy regresyjne? Prawie, zostały dwa scenariusze dotyczące powiadomień push i wideo. Dobrze, priorytetem jest naprawa błędu z wysyłką wiadomości. Tomek, masz już poprawkę? Tak, testuję ją teraz i do końca dnia wrzucę do gałęzi release. Świetnie, pamiętajmy też o aktualizacji dokumentacji. Zosia, czy możesz spisać instrukcję krok po kroku dla działu wsparcia? Jasne, wyślę wersję roboczą jutro rano. Pod koniec tygodnia spotkamy się jeszcze raz, żeby potwierdzić datę publikacji."
+    },
+    {
+      "id": "overlap_customer_support",
+      "category": "overlap",
+      "description": "Rozmowa działu wsparcia, dwie osoby mówią naprzemiennie i na siebie",
+      "audio_path": "bench/samples/overlap_customer_support.wav",
+      "reference_text": "Dzień dobry, tutaj dział wsparcia Skrybson. Klient zgłasza, że po aktualizacji nie widzi historii czatów. Możesz sprawdzić logi? Już patrzę, wygląda na to, że indeksowanie nie przeszło na nowym serwerze. W tym samym czasie druga linia pyta, czy możemy odtworzyć błąd w środowisku testowym. Spróbuję wgrać kopię bazy. Czekaj, klient znów pisze, że problem dotyczy tylko kont premium. To zawęża obszar. Sprawdzę, czy migracja uprawnień uwzględniła nowych użytkowników. Proszę o cierpliwość, pracujemy nad rozwiązaniem i damy znać w ciągu godziny."
+    }
+  ]
+}

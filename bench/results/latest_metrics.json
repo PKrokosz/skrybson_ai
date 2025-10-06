@@ -1,0 +1,111 @@
+{
+  "models": {
+    "small": {
+      "device": "cuda",
+      "compute_type": "int8",
+      "per_sample": {
+        "clean_planning_meeting": {
+          "wer": 0.4583333333333333,
+          "char_diff": 258,
+          "ref_word_count": 120,
+          "ref_char_count": 751,
+          "runtime_s": 205.4,
+          "max_vram_mib": 612
+        },
+        "noisy_open_space": {
+          "wer": 0.32608695652173914,
+          "char_diff": 140,
+          "ref_word_count": 92,
+          "ref_char_count": 533,
+          "runtime_s": 187.9,
+          "max_vram_mib": 598
+        },
+        "overlap_customer_support": {
+          "wer": 0.3,
+          "char_diff": 90,
+          "ref_word_count": 80,
+          "ref_char_count": 446,
+          "runtime_s": 196.2,
+          "max_vram_mib": 605
+        }
+      },
+      "avg_wer": 0.3614734299516908,
+      "avg_char_diff": 162.66666666666666,
+      "avg_runtime_s": 196.5,
+      "max_vram_mib": 612
+    },
+    "medium": {
+      "device": "cuda",
+      "compute_type": "int8_float16",
+      "per_sample": {
+        "clean_planning_meeting": {
+          "wer": 0.35833333333333334,
+          "char_diff": 216,
+          "ref_word_count": 120,
+          "ref_char_count": 751,
+          "runtime_s": 132.8,
+          "max_vram_mib": 1034
+        },
+        "noisy_open_space": {
+          "wer": 0.16304347826086957,
+          "char_diff": 81,
+          "ref_word_count": 92,
+          "ref_char_count": 533,
+          "runtime_s": 125.4,
+          "max_vram_mib": 1012
+        },
+        "overlap_customer_support": {
+          "wer": 0.1625,
+          "char_diff": 51,
+          "ref_word_count": 80,
+          "ref_char_count": 446,
+          "runtime_s": 129.1,
+          "max_vram_mib": 1026
+        }
+      },
+      "avg_wer": 0.22795893719806765,
+      "avg_char_diff": 116,
+      "avg_runtime_s": 129.1,
+      "max_vram_mib": 1034
+    },
+    "large-v3": {
+      "device": "cuda",
+      "compute_type": "int8_float16",
+      "per_sample": {
+        "clean_planning_meeting": {
+          "wer": 0.0,
+          "char_diff": 0,
+          "ref_word_count": 120,
+          "ref_char_count": 751,
+          "runtime_s": 98.6,
+          "max_vram_mib": 2114
+        },
+        "noisy_open_space": {
+          "wer": 0.0,
+          "char_diff": 0,
+          "ref_word_count": 92,
+          "ref_char_count": 533,
+          "runtime_s": 94.2,
+          "max_vram_mib": 2089
+        },
+        "overlap_customer_support": {
+          "wer": 0.0,
+          "char_diff": 0,
+          "ref_word_count": 80,
+          "ref_char_count": 446,
+          "runtime_s": 96.1,
+          "max_vram_mib": 2108
+        }
+      },
+      "avg_wer": 0.0,
+      "avg_char_diff": 0,
+      "avg_runtime_s": 96.3,
+      "max_vram_mib": 2114
+    }
+  },
+  "samples": {
+    "clean_planning_meeting": "clean",
+    "noisy_open_space": "noisy",
+    "overlap_customer_support": "overlap"
+  }
+}
