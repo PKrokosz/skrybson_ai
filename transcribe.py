@@ -22,6 +22,7 @@ class TranscribeConfig:
     recordings_dir: Path
     output_dir: Path
     session_dir: Optional[Path]
+    requested_device: str
     model_size: str
     device: str
     compute_type: str
@@ -32,10 +33,19 @@ class TranscribeConfig:
     sanitize_lower_noise: bool
 
 
+DEFAULT_POLICIES = {
+    "cuda": {"model": "large-v3", "compute": "int8_float16"},
+    "cpu": {"model": "medium", "compute": "int8"},
+}
+
+
 def _strtobool_env(value: Optional[str], default: bool) -> bool:
     if value is None:
         return default
-    return value.strip() not in {"0", "false", "False"}
+    coerced = value.strip()
+    if not coerced:
+        return default
+    return coerced.lower() not in {"0", "false", "no"}
 
 
 def _parse_int(value: Optional[str], default: int) -> int:
@@ -72,39 +82,59 @@ def load_config() -> TranscribeConfig:
         raw_session = Path(session_env).expanduser()
         session_dir = raw_session if raw_session.is_absolute() else recordings_dir / raw_session
 
-    requested_device = os.environ.get("WHISPER_DEVICE", "cuda").lower()
-    model_size = os.environ.get("WHISPER_MODEL", "large-v3")
-    compute_type = os.environ.get("WHISPER_COMPUTE", "int8_float16").lower()
+    requested_device = os.environ.get("WHISPER_DEVICE", "cuda").strip().lower()
+    if requested_device not in {"cuda", "cpu"}:
+        print(
+            f"[!] Nieznany WHISPER_DEVICE={requested_device}, używam domyślnego cuda.",
+            file=sys.stderr,
+        )
+        requested_device = "cuda"
+
+    policy_defaults = DEFAULT_POLICIES[requested_device]
+
+    model_env = os.environ.get("WHISPER_MODEL")
+    model_size = model_env.strip() if model_env and model_env.strip() else policy_defaults["model"]
+    compute_type_env = os.environ.get("WHISPER_COMPUTE")
+    if compute_type_env is not None:
+        compute_type_env = compute_type_env.strip().lower()
+        if not compute_type_env:
+            compute_type_env = None
+    compute_type = (compute_type_env or policy_defaults["compute"]).lower()
 
     valid_compute_types = {"int8_float16", "int8", "float16"}
     if compute_type not in valid_compute_types:
         print(
-            f"[!] Nieznany WHISPER_COMPUTE={compute_type}, używam domyślnego int8_float16.",
+            f"[!] Nieznany WHISPER_COMPUTE={compute_type}, używam polityki domyślnej {policy_defaults['compute']}.",
             file=sys.stderr,
         )
-        compute_type = "int8_float16"
+        compute_type = policy_defaults["compute"]
 
-    beam_size = max(1, _parse_int(os.environ.get("WHISPER_BEAM"), 5))
+    device = requested_device
+    if requested_device == "cuda" and not _cuda_available():
+        print(
+            "[policy] CUDA nie jest dostępna, przełączam na CPU z polityką awaryjną.",
+            file=sys.stderr,
+        )
+        device = "cpu"
+        cpu_defaults = DEFAULT_POLICIES["cpu"]
+        if "WHISPER_MODEL" not in os.environ:
+            model_size = cpu_defaults["model"]
+        if "WHISPER_COMPUTE" not in os.environ:
+            compute_type = cpu_defaults["compute"]
+
+    beam_size = max(1, _parse_int(os.environ.get("WHISPER_SEGMENT_BEAM"), 5))
     language = os.environ.get("WHISPER_LANG", "pl")
     vad_filter = _strtobool_env(os.environ.get("WHISPER_VAD"), True)
     vad_parameters = {"min_silence_duration_ms": 500, "padding_duration_ms": 120}
     sanitize_lower_noise = _strtobool_env(os.environ.get("SANITIZE_LOWER_NOISE"), False)
 
-    if requested_device == "cuda" and not _cuda_available():
-        print(
-            "[!] CUDA nie jest dostępna, przełączam na CPU z modelem medium i compute_type int8.",
-            file=sys.stderr,
-        )
-        requested_device = "cpu"
-        model_size = "medium"
-        compute_type = "int8"
-
     return TranscribeConfig(
         recordings_dir=recordings_dir,
         output_dir=output_dir,
         session_dir=session_dir,
+        requested_device=requested_device,
         model_size=model_size,
-        device="cuda" if requested_device == "cuda" else "cpu",
+        device=device,
         compute_type=compute_type,
         beam_size=beam_size,
         language=language,
@@ -286,18 +316,31 @@ def main():
         print(f"[!] Brak sensownych plików WAV w {raw_dir} (>=1KB).")
         sys.exit(0)
 
-    print(f"[i] Sesja: {session_dir}")
     print(
-        "[i] Konfiguracja: model={model} device={device} compute_type={compute} "
-        "beam={beam} language={lang} vad={vad}".format(
-            model=config.model_size,
+        "[policy] Urządzenie: żądano {requested} -> używam {device}".format(
+            requested=config.requested_device,
             device=config.device,
-            compute=config.compute_type,
-            beam=config.beam_size,
-            lang=config.language,
-            vad=int(config.vad_filter),
         )
     )
+    print(
+        "[policy] Model: {model} @ {compute}".format(
+            model=config.model_size,
+            compute=config.compute_type,
+        )
+    )
+    print(
+        "[policy] Beam: {beam} (WHISPER_SEGMENT_BEAM) | VAD: {vad} (WHISPER_VAD)".format(
+            beam=config.beam_size,
+            vad="on" if config.vad_filter else "off",
+        )
+    )
+    print(
+        "[policy] Filtr szumów (SANITIZE_LOWER_NOISE): {state}".format(
+            state="on" if config.sanitize_lower_noise else "off",
+        )
+    )
+    print(f"[i] Sesja: {session_dir}")
+    print(f"[i] Język rozpoznawania: {config.language}")
 
     manifest_path = session_dir / "manifest.json"
     manifest: Dict[str, object] = {}
