@@ -12,11 +12,24 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Protocol, Sequence, Type, cast
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    Sequence,
+    SupportsFloat,
+    Type,
+    cast,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - only for type hints
-    from align import WhisperWordAligner
     from faster_whisper import WhisperModel as _WhisperModelType
+
+    from align import WhisperWordAligner
 else:  # pragma: no cover - runtime import guard
     _WhisperModelType = object
 
@@ -697,11 +710,13 @@ def _format_timestamp(seconds: float, *, separator: str) -> str:
     return f"{hours:02}:{minutes:02}:{secs:02}.{millis:03}"
 
 
-def write_srt(segments: List[Dict[str, float]], path: Path, *, base: float = 0.0) -> None:
+def write_srt(
+    segments: Iterable[Mapping[str, object]], path: Path, *, base: float = 0.0
+) -> None:
     lines = []
     for idx, seg in enumerate(segments, start=1):
-        start = float(seg["start"]) - base
-        end = float(seg["end"]) - base
+        start = float(cast(SupportsFloat, seg["start"])) - base
+        end = float(cast(SupportsFloat, seg["end"])) - base
         lines.append(str(idx))
         lines.append(
             f"{_format_timestamp(start, separator=',')} --> {_format_timestamp(end, separator=',')}"
@@ -711,11 +726,13 @@ def write_srt(segments: List[Dict[str, float]], path: Path, *, base: float = 0.0
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def write_vtt(segments: List[Dict[str, float]], path: Path, *, base: float = 0.0) -> None:
+def write_vtt(
+    segments: Iterable[Mapping[str, object]], path: Path, *, base: float = 0.0
+) -> None:
     lines = ["WEBVTT", ""]
     for seg in segments:
-        start = float(seg["start"]) - base
-        end = float(seg["end"]) - base
+        start = float(cast(SupportsFloat, seg["start"])) - base
+        end = float(cast(SupportsFloat, seg["end"])) - base
         lines.append(
             f"{_format_timestamp(start, separator='.')} --> {_format_timestamp(end, separator='.')}"
         )
