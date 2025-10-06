@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
-from typing import cast
+from typing import Optional, cast
 from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -19,8 +20,11 @@ from transcribe import (
     MockWhisperModel,
     ModelAttempt,
     TranscribeConfig,
+    _cli_overrides,
     _format_timestamp,
+    _is_recoverable_model_error,
     _parse_int,
+    _resolve_session_path,
     _strtobool_env,
     build_model_attempts,
     load_config,
@@ -29,6 +33,8 @@ from transcribe import (
     pick_latest_session,
     sanitize_text,
     soft_merge_segments,
+    write_srt,
+    write_vtt,
 )
 
 
@@ -204,6 +210,32 @@ class LoadConfigProfileTest(unittest.TestCase):
         self.assertEqual(config.language, "pl")
 
 
+class LoadConfigFallbackTest(unittest.TestCase):
+    def test_cuda_fallback_to_cpu_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            recordings_dir = Path(tmpdir) / "recordings"
+            output_dir = Path(tmpdir) / "out"
+            recordings_dir.mkdir()
+            output_dir.mkdir()
+
+            with patch.dict(
+                os.environ,
+                {
+                    "RECORDINGS_DIR": str(recordings_dir),
+                    "OUTPUT_DIR": str(output_dir),
+                    "WHISPER_DEVICE": "cuda",
+                },
+                clear=True,
+            ):
+                with patch("transcribe._cuda_available", return_value=False):
+                    config = load_config(None)
+
+        self.assertEqual(config.requested_device, "cuda")
+        self.assertEqual(config.device, "cpu")
+        self.assertEqual(config.model_size, "medium")
+        self.assertEqual(config.compute_type, "int8")
+
+
 class MockWhisperModelTest(unittest.TestCase):
     def test_mock_transcribe_returns_placeholder(self) -> None:
         model = MockWhisperModel(language="pl")
@@ -212,6 +244,123 @@ class MockWhisperModelTest(unittest.TestCase):
         self.assertEqual(len(segments), 1)
         self.assertTrue(segments[0].text.startswith("[mock:pl]"))
         self.assertEqual(info["language"], "pl")
+
+
+class CliHelpersTest(unittest.TestCase):
+    def test_cli_overrides_detects_any_override(self) -> None:
+        args = argparse.Namespace(
+            recordings=Path("/tmp/rec"),
+            output=None,
+            session=None,
+            profile=None,
+            device=None,
+            model=None,
+            compute_type=None,
+            beam_size=None,
+            language=None,
+            vad_filter=None,
+            sanitize_lower_noise=None,
+            align_words=None,
+        )
+        self.assertTrue(_cli_overrides(args))
+
+        none_args = argparse.Namespace(
+            recordings=None,
+            output=None,
+            session=None,
+            profile=None,
+            device=None,
+            model=None,
+            compute_type=None,
+            beam_size=None,
+            language=None,
+            vad_filter=None,
+            sanitize_lower_noise=None,
+            align_words=None,
+        )
+        self.assertFalse(_cli_overrides(none_args))
+
+
+class SessionResolutionTest(unittest.TestCase):
+    def _make_config(self, recordings_dir: Path, session_dir: Optional[Path]) -> TranscribeConfig:
+        return TranscribeConfig(
+            recordings_dir=recordings_dir,
+            output_dir=recordings_dir / "out",
+            session_dir=session_dir,
+            requested_device="cpu",
+            model_size="small",
+            device="cpu",
+            compute_type="int8",
+            beam_size=1,
+            language="pl",
+            vad_filter=False,
+            vad_parameters={},
+            sanitize_lower_noise=False,
+            align_words=False,
+            profile=None,
+            mock_transcriber=False,
+        )
+
+    def test_resolve_prefers_explicit_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            recordings_dir = Path(tmpdir) / "rec"
+            recordings_dir.mkdir()
+            explicit = recordings_dir / "sessionA"
+            explicit.mkdir()
+
+            config = self._make_config(recordings_dir, explicit)
+            resolved = _resolve_session_path(config)
+
+        self.assertEqual(resolved, explicit.resolve())
+
+    def test_resolve_falls_back_to_latest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            recordings_dir = Path(tmpdir) / "rec"
+            recordings_dir.mkdir()
+            first = recordings_dir / "session1"
+            second = recordings_dir / "session2"
+            first.mkdir()
+            second.mkdir()
+            time.sleep(0.01)
+            os.utime(second, None)
+
+            config = self._make_config(recordings_dir, None)
+            resolved = _resolve_session_path(config)
+
+        self.assertEqual(resolved, second.resolve())
+
+
+class TimestampWritersTest(unittest.TestCase):
+    def test_write_srt_and_vtt_outputs(self) -> None:
+        segments = [
+            {"start": 0.0, "end": 1.0, "text": "Hello"},
+            {"start": 1.5, "end": 3.0, "text": "World"},
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            srt_path = base / "out.srt"
+            vtt_path = base / "out.vtt"
+
+            write_srt(segments, srt_path)
+            write_vtt(segments, vtt_path, base=0.5)
+
+            srt_content = srt_path.read_text(encoding="utf-8").splitlines()
+            vtt_content = vtt_path.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(srt_content[0], "1")
+        self.assertEqual(srt_content[1], "00:00:00,000 --> 00:00:01,000")
+        self.assertEqual(vtt_content[0], "WEBVTT")
+        self.assertIn("00:00:01.000 --> 00:00:02.500", vtt_content)
+
+
+class RecoverableErrorsTest(unittest.TestCase):
+    def test_memory_errors_are_recoverable(self) -> None:
+        self.assertTrue(_is_recoverable_model_error(MemoryError()))
+        oom = RuntimeError("CUDA out of memory while loading model")
+        self.assertTrue(_is_recoverable_model_error(oom))
+        other = RuntimeError("network unavailable")
+        self.assertFalse(_is_recoverable_model_error(other))
 
 
 if __name__ == "__main__":  # pragma: no cover - manual execution
