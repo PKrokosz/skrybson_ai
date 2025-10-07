@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import inspect
 import json
 import os
 import re
@@ -234,6 +235,27 @@ def _parse_int(value: Optional[str], default: int) -> int:
         return default
 
 
+def _build_vad_parameters() -> Dict[str, int]:
+    """Return VAD parameters compatible with the installed faster-whisper version."""
+
+    pad_ms = 120
+    parameters: Dict[str, int] = {"min_silence_duration_ms": 500}
+    try:
+        from faster_whisper.vad import VadOptions  # type: ignore
+
+        signature = inspect.signature(VadOptions)
+        available = set(signature.parameters)
+    except Exception:
+        available = {"speech_pad_ms"}
+
+    if "speech_pad_ms" in available:
+        parameters["speech_pad_ms"] = pad_ms
+    elif "padding_duration_ms" in available:
+        parameters["padding_duration_ms"] = pad_ms
+
+    return parameters
+
+
 def _cuda_available() -> bool:
     try:
         import torch
@@ -462,7 +484,7 @@ def load_config(args: Optional[argparse.Namespace] = None) -> TranscribeConfig:
 
     vad_override = getattr(args, "vad_filter", None) if args else None
     vad_filter = vad_override if vad_override is not None else _strtobool_env(os.environ.get("WHISPER_VAD"), True)
-    vad_parameters = {"min_silence_duration_ms": 500, "padding_duration_ms": 120}
+    vad_parameters = _build_vad_parameters()
     sanitize_override = getattr(args, "sanitize_lower_noise", None) if args else None
     sanitize_lower_noise = (
         sanitize_override
