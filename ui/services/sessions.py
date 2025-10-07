@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Mapping, Sequence
+from typing import Iterable, List, Mapping, MutableMapping, Sequence
 
 _STATUS_GLYPHS = {
     "new": "⚪",
@@ -42,6 +42,14 @@ class SessionSummary:
     @property
     def status_glyph(self) -> str:
         return _STATUS_GLYPHS.get(self.status, "⚪")
+
+
+@dataclass(slots=True)
+class ManifestIssue:
+    """Describe a single validation issue for a session manifest."""
+
+    level: str
+    message: str
 
 
 def _parse_manifest(manifest_path: Path) -> Mapping[str, object] | None:
@@ -118,4 +126,84 @@ def _load_recordings(session_dir: Path, users: Sequence[str]) -> Sequence[Sessio
     return recordings
 
 
-__all__ = ["SessionSummary", "SessionRecording", "discover_sessions"]
+def _iter_transcript_entries(manifest: MutableMapping[str, object]) -> Iterable[tuple[str, MutableMapping[str, object]]]:
+    transcripts = manifest.get("transcripts")
+    if isinstance(transcripts, MutableMapping):
+        for user_id, payload in transcripts.items():
+            if isinstance(payload, MutableMapping):
+                yield str(user_id), payload
+
+
+def validate_manifest(session_dir: Path) -> List[ManifestIssue]:
+    """Return a diagnostic report for ``session_dir`` manifest integrity."""
+
+    manifest_path = session_dir / "manifest.json"
+    if not manifest_path.exists():
+        return [ManifestIssue(level="error", message="Brak pliku manifest.json w katalogu sesji.")]
+
+    try:
+        manifest: MutableMapping[str, object] = json.loads(manifest_path.read_text(encoding="utf8"))
+    except json.JSONDecodeError as exc:
+        return [ManifestIssue(level="error", message=f"Niepoprawny JSON: {exc}")]
+
+    issues: List[ManifestIssue] = []
+    transcripts = list(_iter_transcript_entries(manifest))
+    if not transcripts:
+        issues.append(
+            ManifestIssue(level="warning", message="Manifest nie zawiera sekcji 'transcripts'.")
+        )
+        return issues
+
+    for user_id, payload in transcripts:
+        prefix = f"Użytkownik {user_id}:"
+        wav_paths = payload.get("wav_path")
+        if isinstance(wav_paths, (list, tuple)):
+            expected_sources = [session_dir / Path(str(p)) for p in wav_paths]
+        elif isinstance(wav_paths, str):
+            expected_sources = [session_dir / Path(wav_paths)]
+        else:
+            expected_sources = []
+
+        if not expected_sources:
+            issues.append(ManifestIssue(level="warning", message=f"{prefix} brak informacji o plikach nagrań."))
+        else:
+            for source in expected_sources:
+                if not source.exists():
+                    issues.append(
+                        ManifestIssue(
+                            level="error",
+                            message=f"{prefix} brak nagrania {source.relative_to(session_dir)}.",
+                        )
+                    )
+
+        for key in ("json_path", "srt_path", "vtt_path"):
+            rel = payload.get(key)
+            if not rel:
+                issues.append(ManifestIssue(level="warning", message=f"{prefix} brak wpisu '{key}'."))
+                continue
+            target = session_dir / Path(str(rel))
+            if not target.exists():
+                issues.append(
+                    ManifestIssue(
+                        level="error",
+                        message=f"{prefix} brak pliku {key}: {Path(str(rel))}.",
+                    )
+                )
+        if not any(issue.message.startswith(prefix) for issue in issues if issue.level != "info"):
+            issues.append(
+                ManifestIssue(
+                    level="info",
+                    message=f"{prefix} wpisy wyglądają poprawnie.",
+                )
+            )
+
+    return issues
+
+
+__all__ = [
+    "SessionSummary",
+    "SessionRecording",
+    "ManifestIssue",
+    "discover_sessions",
+    "validate_manifest",
+]

@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import json
 
+from tkinter import messagebox
+
 from ui.bootstrap import ttk
-from ui.services.sessions import SessionSummary, discover_sessions
+from ui.services.sessions import ManifestIssue, SessionSummary, discover_sessions, validate_manifest
 from ui.state import AppState
 from ui.views.base import View
 from ui.widgets.dialogs import ask_directory
@@ -131,7 +133,37 @@ class SessionsView(View):
         self.state.set_active_profile(self.profile_var.get())
 
     def _check_manifest(self) -> None:
-        self.preview.insert("end", "\n[info] Sprawdzanie manifestu niezaimplementowane")
+        selection = self.tree.selection()
+        if not selection:
+            messagebox.showinfo("Manifest", "Wybierz sesję do weryfikacji manifestu.")
+            return
+        session_id = selection[0]
+        session = next((s for s in self._sessions if s.session_id == session_id), None)
+        if not session:
+            messagebox.showerror("Manifest", "Nie udało się odnaleźć wybranej sesji.")
+            return
+        session_dir = self.state.config.recordings_dir / session.session_id
+        issues = validate_manifest(session_dir)
+        if not issues:
+            issues = [ManifestIssue(level="info", message="Manifest wygląda poprawnie.")]
+
+        self.preview.insert("end", "\n[info] Raport manifestu:\n")
+        for issue in issues:
+            prefix = {
+                "error": "[error]",
+                "warning": "[warn]",
+                "info": "[info]",
+            }.get(issue.level, "[info]")
+            self.preview.insert("end", f"{prefix} {issue.message}\n")
+        self.preview.see("end")
+
+        summary_levels = {issue.level for issue in issues}
+        if "error" in summary_levels:
+            messagebox.showerror("Manifest", "Znaleziono błędy w manifeście — szczegóły w panelu podglądu.")
+        elif "warning" in summary_levels:
+            messagebox.showwarning("Manifest", "Manifest zawiera ostrzeżenia — sprawdź panel podglądu.")
+        else:
+            messagebox.showinfo("Manifest", "Manifest wygląda poprawnie.")
 
 
 __all__ = ["SessionsView"]
