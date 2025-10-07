@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from tkinter import messagebox
 from typing import Dict
 
 from ui.bootstrap import ttk
@@ -96,7 +97,14 @@ class TranscribeView(View):
         session_dir = self._detect_session_dir(config.recordings_dir)
         if session_dir:
             env["SESSION_DIR"] = str(session_dir)
-        self.task_manager.start(env, dry_run=dry_run)
+        try:
+            self.task_manager.start(env, dry_run=dry_run)
+        except RuntimeError as exc:
+            if self.log_widget:
+                self.log_widget.insert(END, f"\n[error] {exc}")
+                self.log_widget.see(END)
+            messagebox.showerror("Transkrypcja", str(exc))
+            return
         self.after(100, self._poll_logs)
         if self.log_widget:
             self.log_widget.insert(END, f"\n[info] Uruchomiono transkrypcję (dry_run={dry_run})")

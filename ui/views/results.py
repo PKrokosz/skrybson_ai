@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
+from tkinter import messagebox
 
 from ui.bootstrap import ttk
 from ui.views.base import View
 from ui.widgets.textutil import END, create_text_widget
+from ui.widgets.dialogs import ask_directory
 
 
 class ResultsView(View):
@@ -82,8 +85,33 @@ class ResultsView(View):
         self.stats_label.configure(text=f"Segmentów: {stats_segments}")
 
     def _export(self) -> None:
-        messagebox = __import__("tkinter.messagebox", fromlist=["messagebox"]).messagebox
-        messagebox.showinfo("Eksport", "Eksport seryjny w przygotowaniu")
+        destination = ask_directory(self.state.config.output_dir)
+        if not destination:
+            return
+        output_dir = self.state.config.output_dir
+        exported = 0
+        errors: list[str] = []
+        for path in output_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in {".json", ".srt", ".vtt"}:
+                continue
+            target = destination / path.relative_to(output_dir)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.copy2(path, target)
+                exported += 1
+            except OSError as exc:
+                errors.append(f"{path.name}: {exc}")
+        if errors:
+            messagebox.showerror(
+                "Eksport",
+                "\n".join(["Niektóre pliki nie zostały skopiowane:"] + errors[:10]),
+            )
+        elif exported == 0:
+            messagebox.showwarning("Eksport", "Brak plików do eksportu w katalogu wynikowym.")
+        else:
+            messagebox.showinfo("Eksport", f"Wyeksportowano {exported} plików do {destination}")
 
 
 __all__ = ["ResultsView"]
