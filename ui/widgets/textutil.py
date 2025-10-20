@@ -15,7 +15,8 @@ def create_text_widget(master: ttk.Widget, *, height: int = 10) -> Any:
     if TTK_VERSION == "stub":
         END = "end"
         return ttk.Text(master, height=height)
-    from tkinter import END as TK_END, Text as TkText
+    from tkinter import END as TK_END
+    from tkinter import Text as TkText
 
     END = TK_END
     return TkText(master, height=height)

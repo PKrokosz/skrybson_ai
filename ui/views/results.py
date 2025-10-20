@@ -8,8 +8,8 @@ from tkinter import messagebox
 
 from ui.bootstrap import ttk
 from ui.views.base import View
-from ui.widgets.textutil import END, create_text_widget
 from ui.widgets.dialogs import ask_directory
+from ui.widgets.textutil import END, create_text_widget
 
 
 class ResultsView(View):

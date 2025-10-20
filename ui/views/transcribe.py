@@ -6,10 +6,10 @@ from tkinter import messagebox
 from typing import Dict
 
 from ui.bootstrap import ttk
-from ui.widgets.textutil import END, create_text_widget
 from ui.services.tasks import TaskManager
 from ui.state import AppState
 from ui.views.base import View
+from ui.widgets.textutil import END, create_text_widget
 
 
 class TranscribeView(View):
