@@ -11,7 +11,6 @@ from pathlib import Path
 from threading import Event, Thread
 from typing import Iterable, List, Sequence
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 

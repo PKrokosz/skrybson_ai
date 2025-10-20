@@ -241,7 +241,7 @@ def _build_vad_parameters() -> Dict[str, int]:
     pad_ms = 120
     parameters: Dict[str, int] = {"min_silence_duration_ms": 500}
     try:
-        from faster_whisper.vad import VadOptions  # type: ignore
+        from faster_whisper.vad import VadOptions
 
         signature = inspect.signature(VadOptions)
         available = set(signature.parameters)

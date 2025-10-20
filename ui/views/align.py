@@ -6,7 +6,12 @@ from pathlib import Path
 from tkinter import messagebox
 
 from ui.bootstrap import ttk
-from ui.services.align import AlignItem, AlignmentMessage, AlignmentWorker, discover_alignment_candidates
+from ui.services.align import (
+    AlignItem,
+    AlignmentMessage,
+    AlignmentWorker,
+    discover_alignment_candidates,
+)
 from ui.views.base import View
 from ui.widgets.textutil import END, create_text_widget
 

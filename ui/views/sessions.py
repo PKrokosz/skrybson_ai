@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-
 from tkinter import messagebox
 
 from ui.bootstrap import ttk

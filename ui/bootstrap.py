@@ -12,12 +12,12 @@ def _load_ttkbootstrap() -> Tuple[ModuleType, type, str, Exception | None]:
     try:
         ttk_module = import_module("ttkbootstrap")
         tooltip_mod = import_module("ttkbootstrap.tooltip")
-        tool_tip = getattr(tooltip_mod, "ToolTip")
+        tool_tip = tooltip_mod.ToolTip
         version = getattr(ttk_module, "__version__", "unknown")
         return ttk_module, tool_tip, version, None
     except Exception as exc:  # pragma: no cover - executed in headless CI
         ttk_module = import_module("ui._compat.ttkbootstrap_stub")
-        tool_tip = getattr(ttk_module, "ToolTip")
+        tool_tip = ttk_module.ToolTip
         return ttk_module, tool_tip, "stub", exc
 
 
