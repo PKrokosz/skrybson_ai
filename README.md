@@ -194,6 +194,34 @@ Skróty klawiszowe:
 - `docs/runbooks/wsl.md` – instrukcje uruchomienia w środowisku WSL.
 - `docs/bench.md` – wyniki benchmarków i wskazówki dot. wydajności.
 
+### Rejestrowanie sesji Discorda (bot Node.js)
+
+Repo zawiera minimalistycznego bota nagrywającego kanały głosowe Discorda (`index.js`). Bot
+nasłuchuje komendy slash `/record start|stop` i zapisuje strumienie użytkowników do WAV-ów w
+`<RECORDINGS_DIR>/<SESSION_PREFIX>-<timestamp>-<channel_id>/raw`. Manifest sesji (`manifest.json`)
+otrzymuje metadane (`startISO`, `stopISO`, id kanału, itp.), dzięki czemu `transcribe.py` może
+bezpośrednio przetwarzać nagrania.
+
+Szybki start bota:
+
+```bash
+npm install
+cp .env.example .env  # ustaw DISCORD_TOKEN
+node index.js         # lub: npm start
+```
+
+Najważniejsze zmienne środowiskowe:
+
+| Nazwa              | Opis                                                                 | Domyślna wartość |
+| ------------------ | -------------------------------------------------------------------- | ---------------- |
+| `DISCORD_TOKEN`    | Token bota Discorda (wymagany).                                       | —                |
+| `RECORDINGS_DIR`   | Katalog, w którym bot zapisuje sesje.                                 | `./recordings`   |
+| `SESSION_PREFIX`   | Prefiks katalogów sesji tworzonych przez bota.                        | `session`        |
+
+Po zalogowaniu bot rejestruje slash command `record`. Komenda `/record start` rozpoczyna
+nagrywanie aktualnego kanału głosowego użytkownika, `/record stop` kończy sesję i domyka wpis w
+`manifest.json`.
+
 ## Workflow developera
 
 ```bash
