@@ -271,11 +271,15 @@ Zainstaluj `pip install -r requirements-align.txt`, ustaw `WHISPER_ALIGN=true` l
 
 ## CODEX CHECK
 
-# skrybson-ai
-Lokalny zestaw narzędzi do nagrywania kanałów głosowych Discord i przetwarzania ich na uporządkowane transkrypcje oraz artefakty analityczne.​:codex-file-citation[codex-file-citation]{line_range_start=1 line_range_end=20 path=pyproject.toml git_url="https://github.com/PKrokosz/skrybson_ai/blob/main/pyproject.toml#L1-L20"}​
+# Skrybson AI
+
+Lokalny zestaw narzędzi do nagrywania kanałów głosowych Discord i przetwarzania ich na uporządkowane transkrypcje oraz artefakty analityczne.  
+> Źródło: [`pyproject.toml`](https://github.com/PKrokosz/skrybson_ai/blob/main/pyproject.toml#L1-L20)
+
+---
 
 ## Spis treści
-- [Architektura (mermaid)](#architektura-mermaid)
+- [Architektura](#architektura)
 - [Możliwości i funkcje (Capabilities)](#możliwości-i-funkcje-capabilities)
 - [Publiczne API / Punkty wejścia](#publiczne-api--punkty-wejścia)
 - [Konfiguracja i środowisko](#konfiguracja-i-środowisko)
@@ -288,7 +292,10 @@ Lokalny zestaw narzędzi do nagrywania kanałów głosowych Discord i przetwarza
 - [Załączniki](#załączniki)
 - [Luki informacyjne](#luki-informacyjne)
 
-## Architektura (mermaid)
+---
+
+## Architektura
+
 ```mermaid
 flowchart TD
     DiscordBot[index.js<br/>Discord recorder] -->|WAV| Recordings[(recordings/)]
@@ -300,170 +307,138 @@ flowchart TD
     Output --> Bench[bench.py<br/>metrics]
     Docker[docker-compose] --> DiscordBot
     Docker --> Transcriber
-Source: 
+```
 
-Możliwości i funkcje (Capabilities)
-Nagrywaj kanały głosowe Discorda komendą /record start, zapisując surowe fragmenty WAV per użytkownik i aktualizując manifest sesji.
+> Źródło: `index.js`, `transcribe.py`, `align.py`, `ui/app.py`, `bench.py`, `docker-compose.yml`
 
-Generuj transkrypcje per użytkownika i globalne (JSON, SRT, VTT), tworząc indeks i odświeżając manifest sesji.
+---
 
-Oczyszczaj tekst (redukcja powtórzeń, filtracja wypełniaczy) i miękko scalaj krótkie segmenty konwersacji.
+## Możliwości i funkcje (Capabilities)
 
-Wyrównuj słowa i (opcjonalnie) diarizuj nagrania przy użyciu WhisperX z poziomu CLI lub zautomatyzowanego worker’a GUI.
+- Nagrywanie kanałów głosowych Discorda komendą `/record start`, zapisując surowe pliki WAV per użytkownik i aktualizując manifest sesji.  
+- Generowanie transkrypcji per użytkownik i globalnej (JSON, SRT, VTT) z automatycznym odświeżaniem manifestu.  
+- Oczyszczanie tekstu (redukcja powtórzeń, filtracja wypełniaczy) i scalanie krótkich segmentów rozmów.  
+- Wyrównywanie słów i (opcjonalnie) diarizacja nagrań przy użyciu WhisperX z poziomu CLI lub GUI.  
+- Zarządzanie sesjami, transkrypcją, alignmentem, logami i eksportem w interfejsie SkrybsonApp.  
+- Benchmarkowanie modeli faster-whisper na zestawie próbek.
 
-Zarządzaj sesjami, transkrypcją, alignmentem, logami i eksportem w wielowidokowym interfejsie SkrybsonApp.
+> Źródło: `transcribe.py`, `align.py`, `ui/app.py`, `bench.py`
 
-Benchmarkuj modele faster-whisper na zestawie próbek, korzystając z gotowych wyników lub świeżych uruchomień.
+---
 
-Publiczne API / Punkty wejścia
-CLI Python
-Transkrypcja
+## Publiczne API / Punkty wejścia
+
+### CLI Python
+
+**Transkrypcja**
+```bash
 python transcribe.py --recordings ./recordings --output ./out --profile quality@cuda
-Parametry nadpisują zmienne środowiskowe (katalogi, profil, urządzenie, model, beam, język, VAD, redukcję szumów, alignment). Wyjściem są katalogi transcripts/ z JSON/SRT/VTT i zaktualizowany manifest sesji. Zwraca kod błędu, gdy brakuje nagrań lub sesji.
+```
 
-Alignment słów
+**Alignment**
+```bash
 python align.py recordings/session/raw.wav out/transcripts/user.json --output out/transcripts/user.aligned.json --device cuda --language pl --diarize
-Wymaga JSON-a z listą segmentów; opcjonalnie generuje diarization przy tokenie PYANNOTE_AUTH_TOKEN. Wynik zawiera listę słów z czasami oraz (gdy diarization aktywne) etykiety mówców.
+```
 
-Benchmark
+**Benchmark**
+```bash
 python bench.py --run-models --models small medium --device cuda --compute-type int8_float16
-Bez --run-models korzysta z bench/results/precomputed.json. Raport zapisuje do bench/results/latest_metrics.json i wypisuje tabelę WER/VRAM/czas.
+```
 
-Interfejsy graficzne
-python -m ui.app uruchamia aplikację SkrybsonApp (wymaga środowiska z Tk/ttkbootstrap). Widoki pozwalają wskazać katalogi, odpalać transkrypcję (dry-run / real), monitorować logi i alignment.
+### GUI
+```bash
+python -m ui.app
+```
 
-python gui.py oferuje uproszczone okno Tkinter z formularzem ścieżek i przyciskami Start/Stop; przekazuje parametry do transcribe.py w wątku roboczym.
-
-Bot Discord
-npm start lub node index.js uruchamia bota, który rejestruje globalną komendę /record z podkomendami start i stop. Wymaga DISCORD_TOKEN i (opcjonalnie) RECORDINGS_DIR, SESSION_PREFIX. Surowe WAV-y i manifest są zapisywane w strukturze recordings/session-<timestamp>-<channelId>/raw. Przy zatrzymaniu bot dopisuje stopISO do manifestu.
-
-Source: 
-
-Konfiguracja i środowisko
-Wersje narzędzi: Python ≥3.10 (docelowo 3.12 w narzędziach mypy/ruff), opcjonalne extras align (whisperx + pyannote). Node 22 w obrazie produkcyjnym. Docker Compose udostępnia wariant CPU (python:3.11-slim) i GPU (faster-whisper CUDA).
-
-Zależności runtime: faster-whisper (podstawa), ttkbootstrap, Pillow (UI ikony), biblioteki Discord (discord.js, @discordjs/voice, prism-media, wav, fs-extra, @discordjs/opus, libsodium-wrappers, @snazzah/davey).
-
-Zmienne środowiskowe:
-
-DISCORD_TOKEN, RECORDINGS_DIR, SESSION_PREFIX (bot).
-
-RECORDINGS_DIR, OUTPUT_DIR, SESSION_DIR, WHISPER_PROFILE, WHISPER_DEVICE, WHISPER_MODEL, WHISPER_COMPUTE, WHISPER_SEGMENT_BEAM, WHISPER_LANG, WHISPER_VAD, SANITIZE_LOWER_NOISE, WHISPER_ALIGN, WHISPER_MOCK (transkrypcja).
-
-PYANNOTE_AUTH_TOKEN (alignment diarization).
-
-Kontenery Compose wstrzykują powyższe oraz mapują katalogi hosta (recordings, out).
-
-Konfiguracja UI: profile (quality@cuda, cpu-fallback, custom) i ścieżki zapisywane w ~/.skrybson/config.json. Status bar prezentuje aktywny profil i status widoku.
-
-Source: 
-
-Instalacja i szybki start
-Wariant Python
-bash
-Skopiuj kod
-# co robi: tworzy i aktywuje środowisko wirtualne
-python -m venv .venv && source .venv/bin/activate
-# co robi: instaluje zależności bazowe oraz (opcjonalnie) alignment
-pip install -U pip && pip install -r requirements.txt && pip install '.[align]'  # extras gdy potrzebny whisperx
-# co robi: uruchamia transkrypcję z domyślnym profilem
-python transcribe.py --recordings ./recordings --output ./out
-Source: 
-
-Wariant Node
-bash
-Skopiuj kod
-# co robi: instaluje zależności bota
-npm install
-# co robi: uruchamia nagrywanie (slash commands /record start|stop)
+### Bot Discord
+```bash
 npm start
-Source: 
+```
 
-Przepływy pracy (Sposoby pracy)
-Nagrywanie ➜ Transkrypcja ręczna: Uruchom bota (npm start), nagraj /record start, po zakończeniu /record stop, a następnie python transcribe.py wskazując katalog nagrań recordings/…. Pliki wynikowe trafiają do out/<sesja>/transcripts.
+---
 
-Automatyzacja w Docker Compose: docker compose up discord-recorder (bot) oraz jednorazowy docker compose run transcriber generują wyniki w wolumenach hosta (./recordings, ./out). Wersja GPU korzysta z obrazu faster-whisper i rezerwuje urządzenie NVIDIA.
+## Konfiguracja i środowisko
 
-Transkrypcja z UI: W widoku „Transkrypcja” ustaw katalogi i zmienne (WHISPER_*, SANITIZE_LOWER_NOISE, WHISPER_ALIGN), następnie wybierz „Dry-Run (Mock)” lub „Start”. UI steruje transcribe.py przez TaskManager, zbierając logi w czasie rzeczywistym.
+Python ≥3.10 (zalecane 3.12), Node 22, Docker Compose (warianty CPU/GPU).  
+Zależności: `faster-whisper`, `ttkbootstrap`, `Pillow`, `discord.js`, `@discordjs/voice`, `prism-media`, `wav`, `fs-extra`, `@discordjs/opus`, `libsodium-wrappers`, `@snazzah/davey`.
 
-Alignment: Widok „Alignment” skanuje katalog wynikowy (discover_alignment_candidates) i pozwala uruchomić równolegle align.py dla wybranych JSON-ów, raportując sukcesy/ostrzeżenia w logu.
+Zmienne środowiskowe:  
+`DISCORD_TOKEN`, `RECORDINGS_DIR`, `OUTPUT_DIR`, `WHISPER_PROFILE`, `PYANNOTE_AUTH_TOKEN`, `WHISPER_MODEL`, `WHISPER_LANG`.
 
-Eksploracja wyników i eksport: Widok „Sesje” prezentuje manifesty, „Wyniki” agreguje SRT/VTT/JSON i pozwala kopiować pliki do dowolnego katalogu, a „Logs” zbiera logi z transkrypcji.
+---
 
-Benchmarki: python bench.py --run-models uruchamia modele na próbkach z bench/manifest.json; bez flagi korzysta z wyników bench/results/precomputed.json. Widok „Bench” (UI) obecnie pokazuje statyczne wiersze i zapisuje raport do docs/bench.md.
+## Instalacja i szybki start
 
-Source: 
+### Python
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -U pip && pip install -r requirements.txt && pip install '.[align]'
+python transcribe.py --recordings ./recordings --output ./out
+```
 
-Testy i jakość
-Jednostkowe & integracyjne: pytest (skonfigurowany z -ra, Python path = .). Testy pokrywają parser CLI, sanitizację tekstu, łączenie segmentów, fallbacki modelu, walidację manifestu, manager zadań oraz konstrukcję UI (warunkowo).
+### Node
+```bash
+npm install
+npm start
+```
 
-Linting/format: ruff (E,F,B,I; limit 100 znaków) i mypy (Python 3.12, ostrzeżenia warn_return_any, ignorowanie brakujących importów; UI oraz bench/align/guy zignorowane).
+---
 
-Przykładowe komendy:
+## Przepływy pracy (Sposoby pracy)
 
-pytest
+Nagrywanie ➜ Transkrypcja ➜ Alignment ➜ Eksport.  
+Możliwość pracy w Docker Compose (CPU/GPU) lub lokalnie przez CLI/UI.
 
-ruff check .
+---
 
-mypy transcribe.py tests
+## Testy i jakość
 
-Source: 
+`pytest`, `ruff`, `mypy`.  
+Testy pokrywają parser CLI, sanitizację tekstu, UI, alignment i manifesty.  
+Styl: `ruff (E,F,B,I)` i `mypy` z Python 3.12.
 
-Integracje i zewnętrzne usługi
-Discord API (slash commands, Voice Gateway) via discord.js, @discordjs/voice, @discordjs/opus, prism-media, libsodium-wrappers. Wymaga ważnego tokena bota w .env.
+---
 
-WhisperX / pyannote do alignmentu i diarization (opcjonalne, aktywowane przez extras align i zmienną PYANNOTE_AUTH_TOKEN).
+## Integracje i zewnętrzne usługi
 
-Docker Compose do koordynacji usług (Node recorder + Python transcriber) oraz wariantu GPU (obraz ghcr.io/guillaumekln/faster-whisper).
+Discord API, WhisperX / pyannote, Docker Compose.  
+> Źródło: `index.js`, `bench.py`, `docker-compose.yml`
 
-Source: 
+---
 
-Ograniczenia i znane problemy
-Transkrypcja kończy się z kodem błędu, jeśli brakuje katalogu nagrań (recordings_dir), katalogu sesji lub katalogu raw; dodatkowo ignoruje pliki WAV mniejsze niż 1 KB.
+## Ograniczenia i znane problemy
 
-UI pozwala wpisać WHISPER_VAD_MIN_SILENCE_MS / WHISPER_VAD_SPEECH_PAD_MS, lecz load_config ich nie odczytuje – wartości VAD dobierane są automatycznie na podstawie wersji faster-whisper.
+- Transkrypcja kończy się błędem przy braku katalogu nagrań.  
+- UI nie odczytuje wszystkich zmiennych VAD.  
+- Alignment używa tylko pierwszego pliku `raw_files`.  
+- Widok „Bench” bazuje na danych statycznych.
 
-Alignment wykorzystuje pierwszy wpis raw_files z JSON-u; przy wielu nagraniach ostrzega i pomija pozostałe.
+---
 
-Widok „Bench” prezentuje dane przykładowe i nadpisuje docs/bench.md nowym raportem – brak integracji z rzeczywistymi metrykami UI.
+## Roadmap / TODO
 
-Source: 
+- Zintegrować dane bench z UI.  
+- Dodać edytowalne parametry VAD w `transcribe.py`.  
+- Ujednolicić raporty `docs/bench.md` z wynikami rzeczywistymi.
 
-Roadmap / TODO
-Brak oznaczonych TODO/FIXME w repozytorium (wyszukiwanie rg "TODO" nie zwróciło wyników).
+---
 
-Uzupełnić widok „Bench” o rzeczywiste dane z bench/results/latest_metrics.json zamiast statycznych wierszy i przenoszenia raportu do docs/bench.md.
+## Załączniki
 
-Rozważyć wystawienie konfigurowalnych parametrów VAD w transcribe.py, by odpowiadały polom w UI (WHISPER_VAD_MIN_SILENCE_MS, WHISPER_VAD_SPEECH_PAD_MS).
+| Ścieżka | Rola |
+|---------|------|
+| index.js | Bot Discord nagrywający kanały głosowe |
+| transcribe.py | Pipeline transkrypcji |
+| align.py | CLI do alignmentu i diarizacji |
+| ui/app.py | Interfejs graficzny |
+| bench.py | Benchmark modeli |
 
-Załączniki
-Kluczowe pliki i role
-Ścieżka	Rola
-index.js	Bot Discord nagrywający kanały głosowe i utrzymujący manifest sesji.
-transcribe.py	Główny pipeline transkrypcji: ładowanie konfiguracji, inferencja, sanitizacja, generowanie artefaktów.
-align.py	CLI do wyrównania segmentów na poziomie słów oraz diarization WhisperX.
-ui/app.py	Start SkrybsonApp z widokami Sessions/Transcribe/Align/Results/Bench/Logs/Settings.
-bench.py	Benchmark modeli faster-whisper na zdefiniowanych próbkach i generacja raportu JSON/tabeli.
+---
 
-Słownik pojęć
-Sesja – katalog w recordings/ z plikami raw/*.wav oraz manifest.json opisującym kanał, uczestników i artefakty transkrypcji.
+## Luki informacyjne
 
-Profil (profile) – zestaw domyślnych parametrów transkrypcji (WHISPER_*, beam, język, mock) wybierany w UI i CLI poprzez WHISPER_PROFILE.
-
-Mock transcriber – lekka implementacja MockWhisperModel zwracająca placeholdery, używana w profilu ci-mock lub trybie „Dry-Run (Mock)”.
-
-Luki informacyjne
-Dokumentacja wdrożenia UI (opakowanie jako aplikacja desktopowa) – Nieustalone w repo.
-
-Integracja wyników benchmarków z interfejsem użytkownika – Nieustalone w repo (obecnie statyczne wpisy w UI).
-
-[ ] Czy wszystkie sekcje zawierają cytaty ze ścieżkami i zakresami linii?
-[ ] Czy nie użyto nieistniejących komend/plików?
-[ ] Czy każdy endpoint/komenda ma przykład użycia?
-[ ] Czy diagram odzwierciedla realne pliki/konfiguracje?
-
-Skopiuj kod
-
+- Dokumentacja wdrożenia UI (desktop build) – nieustalone w repo.  
+- Integracja wyników benchmarków z interfejsem – nieustalone.  
 
 
 
